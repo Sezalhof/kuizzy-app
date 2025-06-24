@@ -1,15 +1,23 @@
 // src/components/RequireTeacher.js
 import React from "react";
+import { Navigate } from "react-router-dom";
+import { useAuth } from "../hooks/useAuth";
+import LoadingSpinner from "./LoadingSpinner"; // Reusable loading component
 
-export default function RequireTeacher({ userRole, children }) {
+export default function RequireTeacher({ children }) {
+  const { userRole, loading } = useAuth();
+
+  if (loading) {
+    return <LoadingSpinner message="Verifying access..." />;
+  }
+
   if (userRole !== "teacher") {
     return (
-      <div className="text-center text-red-600 font-bold mt-10">
-        Access Denied — Teachers only
-      </div>
-
-      // Optional: if you'd prefer redirect instead of message, use this:
-      // <Navigate to="/" replace />
+      <Navigate 
+        to="/" 
+        replace 
+        state={{ from: "teacher", message: "Teachers only area" }} 
+      />
     );
   }
 

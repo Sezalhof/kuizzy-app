@@ -17,7 +17,7 @@ export default function StudentTable({ students, onCopy, copiedId, onDetails }) 
               Institution
             </th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Contact
+              Contact (WhatsApp)
             </th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Actions
@@ -43,37 +43,22 @@ export default function StudentTable({ students, onCopy, copiedId, onDetails }) 
               <td className="px-6 py-4 whitespace-nowrap text-sm">
                 <div className="flex gap-2 items-center">
                   <button
-                    onClick={() => window.open(`tel:${student.fatherPhone}`, "_self")}
+                    onClick={() => window.open(`tel:${student.phone}`, "_self")}
                     className="text-green-600 hover:text-green-800"
-                    title="Call father"
+                    title="Call phone"
                   >
                     <PhoneCall className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => onCopy(student.fatherPhone, student.id + "-father")}
+                    onClick={() => onCopy(student.phone, student.id + "-phone")}
                     className="text-gray-600 hover:text-gray-800"
-                    title="Copy father's number"
+                    title="Copy number"
                   >
                     <ClipboardCopy className="w-4 h-4" />
                   </button>
-                  {copiedId === student.id + "-father" && <span className="text-xs text-green-500">Copied!</span>}
-                </div>
-                <div className="flex gap-2 items-center mt-1">
-                  <button
-                    onClick={() => window.open(`tel:${student.motherPhone}`, "_self")}
-                    className="text-green-600 hover:text-green-800"
-                    title="Call mother"
-                  >
-                    <PhoneCall className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => onCopy(student.motherPhone, student.id + "-mother")}
-                    className="text-gray-600 hover:text-gray-800"
-                    title="Copy mother's number"
-                  >
-                    <ClipboardCopy className="w-4 h-4" />
-                  </button>
-                  {copiedId === student.id + "-mother" && <span className="text-xs text-green-500">Copied!</span>}
+                  {copiedId === student.id + "-phone" && (
+                    <span className="text-xs text-green-500">Copied!</span>
+                  )}
                 </div>
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">

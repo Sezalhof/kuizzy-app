@@ -3,19 +3,23 @@ import { Routes, Route } from "react-router-dom";
 import StudentEnrollmentForm from "../StudentEnrollmentForm";
 import Quiz from "../components/Quiz";
 import RequireTeacher from "../components/RequireTeacher";
+import RequireStudent from "../components/RequireStudent";
 import HomePage from "../pages/HomePage";
 import EditProfilePage from "../pages/EditProfilePage";
+import StudentDashboard from "../pages/student/StudentDashboard";
 
-// ✅ Lazy-loaded components — corrected paths
+// Lazy-loaded components with verified paths
 const Leaderboard = React.lazy(() => import("../components/Leaderboard"));
 const ProfilePage = React.lazy(() => import("../pages/ProfilePage"));
-const AdminDashboard = React.lazy(() => import("../pages/admin/AdminDashboard")); // ✅ updated path
+const AdminDashboard = React.lazy(() => import("../pages/admin/AdminDashboard"));
 const TeacherDashboard = React.lazy(() => import("../pages/TeacherDashboard"));
+const StudentDashboardLazy = React.lazy(() => import("../pages/student/StudentDashboard"));
 
-// ✅ Reusable loading spinner for lazy fallback
-const LoadingSpinner = () => (
-  <div className="flex justify-center items-center h-64">
+// Enhanced loading component
+const LoadingSpinner = ({ message = "Loading..." }) => (
+  <div className="flex flex-col justify-center items-center h-64 space-y-4">
     <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+    <p className="text-gray-600">{message}</p>
   </div>
 );
 
@@ -35,6 +39,7 @@ export default function AppRoutes({
   return (
     <Suspense fallback={<LoadingSpinner />}>
       <Routes>
+        {/* Home Route */}
         <Route
           path="/"
           element={
@@ -46,8 +51,12 @@ export default function AppRoutes({
           }
         />
 
+        {/* Public Routes */}
         <Route path="/enroll" element={<StudentEnrollmentForm />} />
+        <Route path="/leaderboard" element={<Leaderboard data={leaderboardData} />} />
+        <Route path="/student-basic" element={<StudentDashboard />} />
 
+        {/* Protected Student Routes */}
         <Route
           path="/quiz"
           element={
@@ -60,16 +69,15 @@ export default function AppRoutes({
             )
           }
         />
+<Route path="/student" element={<StudentDashboard />} />
 
-        <Route
-          path="/leaderboard"
-          element={<Leaderboard data={leaderboardData} />}
-        />
+  
 
+        {/* User Profile Routes */}
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/edit-profile" element={<EditProfilePage user={user} />} />
 
-        {/* ✅ Protected Lazy-loaded Admin Dashboard */}
+        {/* Protected Admin Route */}
         <Route
           path="/admin"
           element={
@@ -83,7 +91,7 @@ export default function AppRoutes({
           }
         />
 
-        {/* ✅ Protected Lazy-loaded Teacher Dashboard */}
+        {/* Protected Teacher Route */}
         <Route
           path="/teacher"
           element={
@@ -93,7 +101,7 @@ export default function AppRoutes({
           }
         />
 
-        {/* Catch-all route */}
+        {/* Fallback Route */}
         <Route
           path="*"
           element={

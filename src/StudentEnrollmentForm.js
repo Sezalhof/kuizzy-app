@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { db, auth } from "./firebase"; // Removed unused 'provider'
-import { doc, setDoc } from 'firebase/firestore';
+import { db, auth } from "./firebase";
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 const grades = [
   'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7',
@@ -12,8 +12,7 @@ export default function StudentEnrollmentForm() {
   const [formData, setFormData] = useState({
     name: '',
     upazila: '',
-    fatherPhone: '',
-    motherPhone: '',
+    phone: '',
     institution: '',
     grade: ''
   });
@@ -39,13 +38,19 @@ export default function StudentEnrollmentForm() {
     setLoading(true);
     try {
       const friendGroup = formData.grade.toLowerCase().replace(/\s+/g, '');
+
       await setDoc(doc(db, 'users', user.uid), {
         uid: user.uid,
         email: user.email,
-        ...formData,
+        name: formData.name,
+        upazila: formData.upazila,
+        phone: formData.phone, // ✅ Single phone number
+        institution: formData.institution,
+        grade: formData.grade,
         friendGroup,
-        createdAt: new Date()
+        updatedAt: serverTimestamp()
       });
+
       setSubmitted(true);
     } catch (err) {
       alert('Error saving data: ' + err.message);
@@ -57,7 +62,7 @@ export default function StudentEnrollmentForm() {
     return (
       <div className="max-w-lg mx-auto mt-16 p-6 text-center bg-green-100 rounded-2xl shadow">
         <h2 className="text-xl font-bold text-green-700 mb-2">Enrollment Successful 🎉</h2>
-        <p className="text-green-600">You can now access quizzes and friend features.</p>
+        <p className="text-green-600">You can now access quizzes and group features.</p>
       </div>
     );
   }
@@ -85,20 +90,10 @@ export default function StudentEnrollmentForm() {
       />
 
       <input
-        name="fatherPhone"
-        placeholder="Father's Phone"
-        type="tel"
-        value={formData.fatherPhone}
-        onChange={handleChange}
-        required
-        className="w-full px-4 py-2 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-      />
-
-      <input
-        name="motherPhone"
-        placeholder="Mother's Phone"
-        type="tel"
-        value={formData.motherPhone}
+        type="text"
+        name="phone"
+        placeholder="Phone (Whatsapp)" // ✅ Custom label is totally fine
+        value={formData.phone}
         onChange={handleChange}
         required
         className="w-full px-4 py-2 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"

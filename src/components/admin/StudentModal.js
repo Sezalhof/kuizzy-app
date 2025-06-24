@@ -32,8 +32,7 @@ export default function StudentDetailModal({ student, onClose }) {
             <div>
               <h4 className="font-medium text-gray-800">Contact Information</h4>
               <div className="mt-2 space-y-2 text-sm">
-                <p><strong>Father's Phone:</strong> {student.fatherPhone || "—"}</p>
-                <p><strong>Mother's Phone:</strong> {student.motherPhone || "—"}</p>
+                <p><strong>Phone (WhatsApp):</strong> {student.phone || "—"}</p>
               </div>
             </div>
           </div>
