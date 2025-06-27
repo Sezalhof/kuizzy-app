@@ -30,6 +30,12 @@ export default function Navbar({ user, userRole, onLogout }) {
           🏆 Leaderboard
         </Link>
 
+        {isStudent && (
+          <Link to="/friends" className="text-gray-700 hover:text-blue-600">
+            🤝 Friends
+          </Link>
+        )}
+
         <Link to="/profile" className="text-gray-700 hover:text-blue-600">
           👤 Profile
         </Link>

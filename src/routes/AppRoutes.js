@@ -11,6 +11,7 @@ import StudentDashboard from "pages/student/StudentDashboard";
 import Quiz from "components/Quiz";
 import RequireTeacher from "components/RequireTeacher";
 import RequireStudent from "components/RequireStudent";
+import { Link } from "react-router-dom";
 
 // ✅ 3. Then dynamic React.lazy() imports
 const Leaderboard = React.lazy(() => import("components/Leaderboard"));
@@ -69,6 +70,8 @@ export default function AppRoutes({
             )
           }
         />
+        
+<Route path="/leaderboard" element={<Leaderboard data={leaderboardData} />} />
 
         {/* Student Dashboard */}
         <Route path="/student" element={<StudentDashboard />} />
