@@ -48,14 +48,10 @@ export default function AdminDashboard({ user, userRole }) {
       const search = searchTerm.toLowerCase();
       const matchesSearch =
         !searchTerm ||
-        Object.values(s)
-          .join(" ")
-          .toLowerCase()
-          .includes(search);
+        Object.values(s).join(" ").toLowerCase().includes(search);
       const matchesGrade = !filterGrade || s.grade === filterGrade;
       const matchesInstitution =
-        !filterInstitution ||
-        s.institution?.toLowerCase().includes(filterInstitution.toLowerCase());
+        !filterInstitution || s.institution?.toLowerCase().includes(filterInstitution.toLowerCase());
       return matchesSearch && matchesGrade && matchesInstitution;
     });
   }, [students, searchTerm, filterGrade, filterInstitution]);
@@ -80,12 +76,8 @@ export default function AdminDashboard({ user, userRole }) {
 
   if (loading) {
     return (
-      <div
-        className="flex justify-center items-center h-64"
-        aria-busy="true"
-        aria-label="Loading students"
-      >
-        <div className="animate-spin rounded-full h-10 w-10 border-t-4 border-blue-600"></div>
+      <div className="flex justify-center items-center h-64" aria-busy="true">
+        <div className="animate-spin rounded-full h-10 w-10 border-t-4 border-blue-600" />
       </div>
     );
   }
@@ -103,10 +95,8 @@ export default function AdminDashboard({ user, userRole }) {
     <div className="max-w-7xl mx-auto mt-10 p-6 bg-white rounded-3xl shadow-md border border-gray-200">
       <h1 className="text-3xl font-bold text-blue-700 mb-6 text-center">🎓 Student Management</h1>
 
-      {/* Stats Cards */}
       <StatsCards students={students} />
 
-      {/* Filters */}
       <StudentFilters
         searchTerm={searchTerm}
         setSearchTerm={setSearchTerm}
@@ -118,7 +108,7 @@ export default function AdminDashboard({ user, userRole }) {
         uniqueInstitutions={uniqueInstitutions}
       />
 
-      {/* Student Table */}
+      {/* Table */}
       <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
@@ -144,12 +134,8 @@ export default function AdminDashboard({ user, userRole }) {
             {filteredStudents.map((student) => (
               <tr key={student.id} className="hover:bg-gray-50">
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="flex items-center">
-                    <div>
-                      <div className="font-medium">{student.name || "—"}</div>
-                      <div className="text-sm text-gray-500">{student.email || "—"}</div>
-                    </div>
-                  </div>
+                  <div className="font-medium">{student.name || "—"}</div>
+                  <div className="text-sm text-gray-500">{student.email || "—"}</div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
@@ -160,42 +146,24 @@ export default function AdminDashboard({ user, userRole }) {
                   <div className="text-sm text-gray-900">{student.institution || "—"}</div>
                   <div className="text-sm text-gray-500">{student.upazila || "—"}</div>
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="flex gap-2 items-center">
+                <td className="px-6 py-4 whitespace-nowrap text-sm">
+                  <div className="px-4 py-2">{student.phone || '—'}</div>
+                  <div className="flex items-center gap-2">
                     <button
-                      onClick={() => window.open(`tel:${student.fatherPhone}`, "_self")}
+                      onClick={() => window.open(`tel:${student.phone}`, "_self")}
                       className="text-green-600 hover:text-green-800"
-                      title="Call father"
+                      title="Call"
                     >
                       <PhoneCall className="w-4 h-4" />
                     </button>
                     <button
-                      onClick={() => handleCopy(student.fatherPhone, student.id + "-father")}
+                      onClick={() => handleCopy(student.phone, student.id)}
                       className="text-gray-600 hover:text-gray-800"
-                      title="Copy father's number"
+                      title="Copy phone"
                     >
                       <ClipboardCopy className="w-4 h-4" />
                     </button>
-                    {copiedId === student.id + "-father" && (
-                      <span className="text-xs text-green-500">Copied!</span>
-                    )}
-                  </div>
-                  <div className="flex gap-2 items-center mt-1">
-                    <button
-                      onClick={() => window.open(`tel:${student.motherPhone}`, "_self")}
-                      className="text-green-600 hover:text-green-800"
-                      title="Call mother"
-                    >
-                      <PhoneCall className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleCopy(student.motherPhone, student.id + "-mother")}
-                      className="text-gray-600 hover:text-gray-800"
-                      title="Copy mother's number"
-                    >
-                      <ClipboardCopy className="w-4 h-4" />
-                    </button>
-                    {copiedId === student.id + "-mother" && (
+                    {copiedId === student.id && (
                       <span className="text-xs text-green-500">Copied!</span>
                     )}
                   </div>
@@ -203,7 +171,7 @@ export default function AdminDashboard({ user, userRole }) {
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                   <button
                     onClick={() => openStudentDetails(student)}
-                    className="text-blue-600 hover:text-blue-900 mr-3"
+                    className="text-blue-600 hover:text-blue-900"
                   >
                     Details
                   </button>
@@ -212,14 +180,13 @@ export default function AdminDashboard({ user, userRole }) {
             ))}
           </tbody>
         </table>
+
         {filteredStudents.length === 0 && (
-          <div className="text-center p-8 text-gray-500">
-            No students found matching your criteria
-          </div>
+          <div className="text-center p-8 text-gray-500">No students found matching your criteria</div>
         )}
       </div>
 
-      {/* Student Detail Modal */}
+      {/* Student Details Modal */}
       {selectedStudent && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -230,43 +197,28 @@ export default function AdminDashboard({ user, userRole }) {
                   onClick={closeStudentDetails}
                   className="text-gray-500 hover:text-gray-700"
                 >
-                  ✕
+                  ×
                 </button>
               </div>
               <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <h4 className="font-medium">Basic Information</h4>
-                  <div className="mt-2 space-y-2">
-                    <p>
-                      <span className="text-gray-600">Name:</span> {selectedStudent.name || "—"}
-                    </p>
-                    <p>
-                      <span className="text-gray-600">Email:</span> {selectedStudent.email || "—"}
-                    </p>
-                    <p>
-                      <span className="text-gray-600">Grade:</span> {selectedStudent.grade || "—"}
-                    </p>
-                    <p>
-                      <span className="text-gray-600">Institution:</span> {selectedStudent.institution || "—"}
-                    </p>
-                    <p>
-                      <span className="text-gray-600">Upazila:</span> {selectedStudent.upazila || "—"}
-                    </p>
+                  <h4 className="font-medium text-gray-800">Basic Information</h4>
+                  <div className="mt-2 space-y-2 text-sm">
+                    <p><strong>Name:</strong> {selectedStudent.name || "—"}</p>
+                    <p><strong>Email:</strong> {selectedStudent.email || "—"}</p>
+                    <p><strong>Grade:</strong> {selectedStudent.grade || "—"}</p>
+                    <p><strong>Institution:</strong> {selectedStudent.institution || "—"}</p>
+                    <p><strong>Upazila:</strong> {selectedStudent.upazila || "—"}</p>
                   </div>
                 </div>
                 <div>
-                  <h4 className="font-medium">Contact Information</h4>
-                  <div className="mt-2 space-y-2">
-                    <p>
-                      <span className="text-gray-600">Father's Phone:</span> {selectedStudent.fatherPhone || "—"}
-                    </p>
-                    <p>
-                      <span className="text-gray-600">Mother's Phone:</span> {selectedStudent.motherPhone || "—"}
-                    </p>
+                  <h4 className="font-medium text-gray-800">Contact</h4>
+                  <div className="mt-2 space-y-2 text-sm">
+                    <p><strong>Phone:</strong> {selectedStudent.phone || "—"}</p>
                   </div>
                 </div>
               </div>
-              <div className="mt-6">
+              <div className="mt-6 flex justify-end">
                 <button
                   onClick={closeStudentDetails}
                   className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"

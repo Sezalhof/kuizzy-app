@@ -1,6 +1,4 @@
-// src/pages/HomePage.js
 import React from "react";
-import { Link } from "react-router-dom";
 
 export default function HomePage({ user = {}, userRole = "", onLogout }) {
   const displayName = user.displayName || user.email?.split("@")[0] || "User";
@@ -11,47 +9,10 @@ export default function HomePage({ user = {}, userRole = "", onLogout }) {
         Welcome, {displayName} 👋
       </h1>
       <p className="text-gray-600 text-lg">
-        Use the navigation above to explore the app.
+        Use the navigation bar above to explore the app.
       </p>
-
-      <div className="flex flex-wrap gap-4 justify-center">
-        {/* Student Dashboard Button */}
-        {userRole === "student" && (
-          <Link to="/student">
-            <button className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition duration-200">
-              Go to Student Dashboard
-            </button>
-          </Link>
-        )}
-
-        {/* Teacher Dashboard Button */}
-        {userRole === "teacher" && (
-          <Link to="/teacher">
-            <button className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg shadow-md transition duration-200">
-              Teacher Portal
-            </button>
-          </Link>
-        )}
-
-        {/* Admin Dashboard Button */}
-        {userRole === "admin" && (
-          <Link to="/admin">
-            <button className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg shadow-md transition duration-200">
-              Admin Dashboard
-            </button>
-          </Link>
-        )}
-
-        {/* Logout Button */}
-        {user?.email && (
-          <button
-            onClick={onLogout}
-            className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg shadow-md transition duration-200"
-          >
-            Sign Out
-          </button>
-        )}
-      </div>
+      {/* Temporarily print user role */}
+      <p className="text-gray-500 text-sm text-center">Role: {userRole}</p>
     </div>
   );
 }

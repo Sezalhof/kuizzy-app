@@ -41,25 +41,29 @@ export default function StudentTable({ students, onCopy, copiedId, onDetails }) 
                 <div className="text-sm text-gray-500">{student.upazila || "—"}</div>
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm">
-                <div className="flex gap-2 items-center">
-                  <button
-                    onClick={() => window.open(`tel:${student.phone}`, "_self")}
-                    className="text-green-600 hover:text-green-800"
-                    title="Call phone"
-                  >
-                    <PhoneCall className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => onCopy(student.phone, student.id + "-phone")}
-                    className="text-gray-600 hover:text-gray-800"
-                    title="Copy number"
-                  >
-                    <ClipboardCopy className="w-4 h-4" />
-                  </button>
-                  {copiedId === student.id + "-phone" && (
-                    <span className="text-xs text-green-500">Copied!</span>
-                  )}
-                </div>
+                {student.phone ? (
+                  <div className="flex gap-2 items-center">
+                    <button
+                      onClick={() => window.open(`tel:${student.phone}`, "_self")}
+                      className="text-green-600 hover:text-green-800"
+                      title="Call phone"
+                    >
+                      <PhoneCall className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => onCopy(student.phone, student.id + "-phone")}
+                      className="text-gray-600 hover:text-gray-800"
+                      title="Copy number"
+                    >
+                      <ClipboardCopy className="w-4 h-4" />
+                    </button>
+                    {copiedId === student.id + "-phone" && (
+                      <span className="text-xs text-green-500">Copied!</span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-gray-400">—</span>
+                )}
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                 <button

@@ -1,6 +1,7 @@
+// src/components/admin/StudentModal.js
 import React from "react";
 
-export default function StudentDetailModal({ student, onClose }) {
+export default function StudentModal({ student, onClose }) {
   if (!student) return null;
 
   return (

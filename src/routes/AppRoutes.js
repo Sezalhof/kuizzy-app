@@ -1,21 +1,27 @@
+// src/routes/AppRoutes.js
+// ✅ 1. Core & library imports
 import React, { Suspense } from "react";
 import { Routes, Route } from "react-router-dom";
-import StudentEnrollmentForm from "../StudentEnrollmentForm";
-import Quiz from "../components/Quiz";
-import RequireTeacher from "../components/RequireTeacher";
-import RequireStudent from "../components/RequireStudent";
-import HomePage from "../pages/HomePage";
-import EditProfilePage from "../pages/EditProfilePage";
-import StudentDashboard from "../pages/student/StudentDashboard";
 
-// Lazy-loaded components with verified paths
-const Leaderboard = React.lazy(() => import("../components/Leaderboard"));
-const ProfilePage = React.lazy(() => import("../pages/ProfilePage"));
-const AdminDashboard = React.lazy(() => import("../pages/admin/AdminDashboard"));
-const TeacherDashboard = React.lazy(() => import("../pages/TeacherDashboard"));
-const StudentDashboardLazy = React.lazy(() => import("../pages/student/StudentDashboard"));
+// ✅ 2. Static imports first
+import HomePage from "pages/HomePage";
+import EditProfilePage from "pages/EditProfilePage";
+import StudentEnrollmentForm from "StudentEnrollmentForm";
+import StudentDashboard from "pages/student/StudentDashboard";
+import Quiz from "components/Quiz";
+import RequireTeacher from "components/RequireTeacher";
+import RequireStudent from "components/RequireStudent";
 
-// Enhanced loading component
+// ✅ 3. Then dynamic React.lazy() imports
+const Leaderboard = React.lazy(() => import("components/Leaderboard"));
+const ProfilePage = React.lazy(() => import("pages/ProfilePage"));
+const AdminDashboard = React.lazy(() => import("pages/admin/AdminDashboard"));
+const TeacherDashboard = React.lazy(() => import("pages/TeacherDashboard"));
+const FriendsPage = React.lazy(() => import("pages/FriendsPage"));
+
+
+
+// Fallback loading UI
 const LoadingSpinner = ({ message = "Loading..." }) => (
   <div className="flex flex-col justify-center items-center h-64 space-y-4">
     <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
@@ -39,16 +45,10 @@ export default function AppRoutes({
   return (
     <Suspense fallback={<LoadingSpinner />}>
       <Routes>
-        {/* Home Route */}
+        {/* Home Page */}
         <Route
           path="/"
-          element={
-            <HomePage
-              user={user}
-              userRole={userRole}
-              onLogout={onLogout}
-            />
-          }
+          element={<HomePage user={user} userRole={userRole} onLogout={onLogout} />}
         />
 
         {/* Public Routes */}
@@ -56,7 +56,7 @@ export default function AppRoutes({
         <Route path="/leaderboard" element={<Leaderboard data={leaderboardData} />} />
         <Route path="/student-basic" element={<StudentDashboard />} />
 
-        {/* Protected Student Routes */}
+        {/* Quiz - Student Only */}
         <Route
           path="/quiz"
           element={
@@ -69,15 +69,20 @@ export default function AppRoutes({
             )
           }
         />
-<Route path="/student" element={<StudentDashboard />} />
 
-  
+        {/* Student Dashboard */}
+        <Route path="/student" element={<StudentDashboard />} />
 
-        {/* User Profile Routes */}
+        {/* Friends Page (Student-only protected) */}
+<Route path="/friends" element={<FriendsPage />} />
+
+
+
+        {/* Profile Pages */}
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/edit-profile" element={<EditProfilePage user={user} />} />
 
-        {/* Protected Admin Route */}
+        {/* Admin Page */}
         <Route
           path="/admin"
           element={
@@ -91,7 +96,7 @@ export default function AppRoutes({
           }
         />
 
-        {/* Protected Teacher Route */}
+        {/* Teacher Dashboard */}
         <Route
           path="/teacher"
           element={
@@ -101,7 +106,7 @@ export default function AppRoutes({
           }
         />
 
-        {/* Fallback Route */}
+        {/* 404 Page */}
         <Route
           path="*"
           element={

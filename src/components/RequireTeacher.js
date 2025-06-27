@@ -1,7 +1,7 @@
 // src/components/RequireTeacher.js
 import React from "react";
 import { Navigate } from "react-router-dom";
-import { useAuth } from "../hooks/useAuth";
+import useAuth from "../hooks/useAuth";
 import LoadingSpinner from "./LoadingSpinner"; // Reusable loading component
 
 export default function RequireTeacher({ children }) {

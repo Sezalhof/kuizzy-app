@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { db } from "../../firebase";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import { useAuth } from "../../hooks/useAuth"; // adjust this path if needed
+import useAuth from "../../hooks/useAuth";
+
 
 const InviteStudentForm = () => {
   const { currentUser } = useAuth(); // current teacher user

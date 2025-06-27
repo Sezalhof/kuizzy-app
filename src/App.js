@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { collection, addDoc, query, orderBy, limit, getDocs } from "firebase/firestore";
 
 import { db } from "./firebase";
-import { useAuth } from "./hooks/useAuth";
+import useAuth from "./hooks/useAuth";
 import { useAuthRedirect } from "./hooks/useAuthRedirect";
 import AppRoutes from "./routes/AppRoutes";
 import Navbar from "./components/Navbar";

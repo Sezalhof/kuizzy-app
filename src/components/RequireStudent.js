@@ -1,17 +1,12 @@
-import React from "react";
 import { Navigate } from "react-router-dom";
-import { useAuth } from "../hooks/useAuth";
-import LoadingSpinner from "./LoadingSpinner";
+import useAuth from "hooks/useAuth";
 
-const RequireStudent = ({ children }) => {
-  const { currentUser, userRole, loading } = useAuth();
+export default function RequireStudent({ children }) {
+  const { currentUser, userRole } = useAuth();
 
-  if (loading) return <LoadingSpinner />;
-
-  if (!currentUser) return <Navigate to="/" replace />;
-  if (userRole !== "student") return <Navigate to="/" replace />;
+  if (!currentUser || userRole !== "student") {
+    return <Navigate to="/" replace />;
+  }
 
   return children;
-};
-
-export default RequireStudent;
+}

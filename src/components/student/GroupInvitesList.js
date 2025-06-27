@@ -9,7 +9,7 @@ import {
   doc,
   arrayUnion,
 } from "firebase/firestore";
-import { useAuth } from "../../hooks/useAuth";
+import useAuth from "../../hooks/useAuth";
 
 const GroupInvitesList = () => {
   const { currentUser } = useAuth(); // student user
