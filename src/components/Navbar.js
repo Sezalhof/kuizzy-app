@@ -20,6 +20,11 @@ export default function Navbar({ user, userRole, onLogout }) {
           🏠 Home
         </Link>
 
+        <Link to="/groups" className="text-gray-700 hover:text-blue-600">
+  👥 Team&Result
+</Link>
+
+
         {isStudent && (
           <Link to="/quiz" className="text-gray-700 hover:text-blue-600">
             🎯 Quiz

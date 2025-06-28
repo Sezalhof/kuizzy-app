@@ -1,26 +1,25 @@
+// src/pages/FriendsPage.js
 import React, { useState } from "react";
 import FriendList from "../components/friends/FriendList";
 import FriendSuggestionList from "../components/friends/FriendSuggestionList";
 
 export default function FriendsPage() {
-  const [activeTab, setActiveTab] = useState("Pending"); // default tab
-
-  const tabs = ["Pending", "Accepted", "Blocked"];
+  const [activeTab, setActiveTab] = useState("pending");
 
   return (
-    <div className="max-w-3xl mx-auto p-6">
-      <h1 className="text-3xl font-bold mb-6 text-center">Friends</h1>
+    <div className="max-w-3xl mx-auto px-4 py-6">
+      <h1 className="text-2xl font-bold text-center mb-4">Friends</h1>
 
-      {/* Tab Navigation */}
+      {/* Tabs */}
       <div className="flex justify-center mb-6 space-x-4">
-        {tabs.map((tab) => (
+        {["pending", "accepted", "blocked"].map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 rounded font-semibold border ${
+            className={`capitalize px-4 py-2 rounded ${
               activeTab === tab
-                ? "bg-blue-600 text-white border-blue-600"
-                : "bg-white text-gray-700 border-gray-300"
+                ? "bg-blue-600 text-white"
+                : "bg-gray-100 text-gray-600"
             }`}
           >
             {tab}
@@ -29,12 +28,11 @@ export default function FriendsPage() {
       </div>
 
       {/* Friend List */}
-      <div className="mb-10">
-        <FriendList activeTab={activeTab} />
-      </div>
+      <FriendList activeTab={activeTab} />
 
-      {/* Friend Suggestions */}
-      <div className="border-t pt-6">
+      {/* Suggestions */}
+      <div className="mt-10">
+        <h2 className="text-lg font-semibold mb-2">People You May Know</h2>
         <FriendSuggestionList />
       </div>
     </div>

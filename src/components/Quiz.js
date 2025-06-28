@@ -1,5 +1,8 @@
-// ✅ Quiz.js — With animations and green correct button
-import React, { useState} from "react";
+import React, { useState } from "react";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "../firebase";
+import useAuth from "../hooks/useAuth";
+import { ensureUserInGroup } from "../utils/groupHelpers";
 
 const questions = [
   {
@@ -19,14 +22,16 @@ const questions = [
   },
 ];
 
-function Quiz({ onComplete }) {
+function Quiz({ onComplete, groupId = null }) {
+  const { user } = useAuth();
+
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [score, setScore] = useState(0);
   const [startTime] = useState(Date.now());
   const [selectedOption, setSelectedOption] = useState(null);
 
   const handleOptionClick = (index) => {
-    if (selectedOption !== null) return; // prevent multiple clicks
+    if (selectedOption !== null) return;
     setSelectedOption(index);
     const correct = questions[currentQuestionIndex].answer === index;
     if (correct) setScore(score + 1);
@@ -36,10 +41,42 @@ function Quiz({ onComplete }) {
         setCurrentQuestionIndex(currentQuestionIndex + 1);
         setSelectedOption(null);
       } else {
-        const duration = Math.floor((Date.now() - startTime) / 1000);
-        onComplete(score + (correct ? 1 : 0), duration);
+        const timeTaken = Math.floor((Date.now() - startTime) / 1000);
+        const finalScore = score + (correct ? 1 : 0);
+        handleSubmitScore(finalScore, timeTaken);
+        onComplete && onComplete(finalScore, timeTaken);
       }
     }, 800);
+  };
+
+  const handleSubmitScore = async (finalScore, duration) => {
+    if (!user?.uid || !groupId) {
+      return;
+    }
+
+    try {
+      console.log("🛡 Current user auth UID:", user.uid);
+      console.log("🧾 Submitting score with:", {
+        userId: user.uid,
+        groupId,
+        value: finalScore,
+        timeTaken: duration,
+      });
+
+      await ensureUserInGroup(groupId, user.uid);
+      await addDoc(collection(db, "scores"), {
+        userId: user.uid,
+        groupId: groupId,
+        value: finalScore,
+        timeTaken: duration,
+        timestamp: serverTimestamp(),
+        quizType: "general",
+        subject: "science",
+      });
+      
+     } catch (err) {
+
+    }
   };
 
   if (currentQuestionIndex >= questions.length) {

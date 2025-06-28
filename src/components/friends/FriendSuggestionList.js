@@ -1,86 +1,172 @@
 // src/components/friends/FriendSuggestionList.js
 import React, { useEffect, useState } from "react";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  doc,
+  setDoc,
+  getDoc,
+} from "firebase/firestore";
 import { db } from "../../firebase";
-import useAuth from "hooks/useAuth";
+import useAuth from "../../hooks/useAuth";
 import { Button } from "../ui/button";
 
-// Utils
-import { getMutualFriendSuggestions } from "../../utils/getMutualFriendSuggestions";
-
 export default function FriendSuggestionList() {
-  const { currentUser } = useAuth();
+  const { user } = useAuth();
   const [suggestions, setSuggestions] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [userInfo, setUserInfo] = useState(null);
+  const [search, setSearch] = useState("");
+  const [message, setMessage] = useState("");
 
-  // Fetch friend suggestions based on mutual friends
   useEffect(() => {
-    if (!currentUser?.uid) return;
-
-    const fetchSuggestions = async () => {
-      try {
-        const mutuals = await getMutualFriendSuggestions(currentUser.uid);
-        setSuggestions(mutuals);
-      } catch (error) {
-        console.error("Error fetching suggestions:", error);
-      } finally {
-        setLoading(false);
+    const fetchUserInfo = async () => {
+      if (!user?.uid) return;
+      const userRef = doc(db, "users", user.uid);
+      const snap = await getDoc(userRef);
+      if (snap.exists()) {
+        setUserInfo(snap.data());
       }
+    };
+    fetchUserInfo();
+  }, [user?.uid]);
+
+  useEffect(() => {
+    const fetchSuggestions = async () => {
+      if (!userInfo?.class || !userInfo?.school) return;
+
+      const usersQuery = query(
+        collection(db, "users"),
+        where("class", "==", userInfo.class),
+        where("school", "==", userInfo.school)
+      );
+      const snapshot = await getDocs(usersQuery);
+
+      const results = [];
+      for (const docSnap of snapshot.docs) {
+        if (docSnap.id === user.uid) continue;
+
+        const data = docSnap.data();
+        const otherUserId = docSnap.id;
+        const reqId1 = `${user.uid}_${otherUserId}`;
+        const reqId2 = `${otherUserId}_${user.uid}`;
+        const [req1, req2] = await Promise.all([
+          getDoc(doc(db, "friend_requests", reqId1)),
+          getDoc(doc(db, "friend_requests", reqId2)),
+        ]);
+
+        if (!req1.exists() && !req2.exists()) {
+          results.push({ uid: otherUserId, ...data });
+        }
+      }
+
+      setSuggestions(results);
     };
 
     fetchSuggestions();
-  }, [currentUser?.uid]);
+  }, [userInfo]);
 
-  const handleSendRequest = async (targetUid) => {
-    if (!currentUser?.uid) return;
-
+  const handleSendRequest = async (toUser) => {
+    const requestId = `${user.uid}_${toUser.uid}`;
     try {
-      const requestRef = doc(db, "friend_requests", `${currentUser.uid}_${targetUid}`);
-      const existingRequest = await getDoc(requestRef);
-
-      if (!existingRequest.exists()) {
-        await setDoc(requestRef, {
-          from: currentUser.uid,
-          to: targetUid,
-          status: "pending",
-          createdAt: new Date()
-        });
-        alert("Friend request sent!");
-      } else {
-        alert("Friend request already sent.");
-      }
-    } catch (error) {
-      console.error("Failed to send friend request:", error);
+      await setDoc(doc(db, "friend_requests", requestId), {
+        fromId: user.uid,
+        toId: toUser.uid,
+        status: "pending",
+        createdAt: new Date(),
+      });
+      setMessage(`Friend request sent to ${toUser.name || toUser.email}`);
+    } catch (err) {
+      console.error("Send request failed:", err);
+      setMessage("Failed to send friend request");
     }
   };
 
-  if (loading) {
-    return (
-      <div className="text-center text-gray-500 py-10">Loading suggestions...</div>
-    );
-  }
+  const handleSearch = async () => {
+    if (!search.trim()) return;
 
-  if (!suggestions.length) {
-    return (
-      <div className="text-center text-gray-500 py-10">No friend suggestions found.</div>
-    );
-  }
+    try {
+      const userQuery = query(collection(db, "users"));
+      const snapshot = await getDocs(userQuery);
+      let found = null;
+
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (
+          docSnap.id !== user.uid &&
+          (data.email === search.trim() || data.phone === search.trim())
+        ) {
+          found = { uid: docSnap.id, ...data };
+        }
+      });
+
+      if (!found) {
+        setMessage("No user found with that phone or email");
+        return;
+      }
+
+      const reqId1 = `${user.uid}_${found.uid}`;
+      const reqId2 = `${found.uid}_${user.uid}`;
+
+      const [req1, req2] = await Promise.all([
+        getDoc(doc(db, "friend_requests", reqId1)),
+        getDoc(doc(db, "friend_requests", reqId2)),
+      ]);
+
+      if (req1.exists() || req2.exists()) {
+        setMessage("Request already exists or you're already friends.");
+        return;
+      }
+
+      await handleSendRequest(found);
+    } catch (err) {
+      console.error("Search error:", err);
+      setMessage("Error searching user.");
+    }
+  };
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-xl font-semibold">People You May Know</h2>
-      {suggestions.map((user) => (
-        <div
-          key={user.uid}
-          className="flex items-center justify-between bg-white p-4 rounded shadow"
-        >
-          <div>
-            <p className="font-medium">{user.displayName}</p>
-            <p className="text-sm text-gray-500">{user.email}</p>
+    <div className="mt-6 space-y-4">
+      <h2 className="text-lg font-bold">People You May Know</h2>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by phone or email"
+          className="border px-3 py-1 rounded text-sm w-full sm:w-64"
+        />
+        <Button size="sm" onClick={handleSearch}>
+          Search
+        </Button>
+      </div>
+
+      {message && (
+        <p className="text-sm text-blue-600 font-medium">{message}</p>
+      )}
+
+      {suggestions.length === 0 ? (
+        <p className="text-sm text-gray-400">No suggestions right now.</p>
+      ) : (
+        suggestions.map((user) => (
+          <div
+            key={user.uid}
+            className="flex justify-between items-center p-3 bg-white border shadow-sm rounded"
+          >
+            <div>
+              <p className="font-semibold">{user.name}</p>
+              <p className="text-xs text-gray-500">
+                {user.class} • {user.school}
+              </p>
+            </div>
+            <Button size="sm" onClick={() => handleSendRequest(user)}>
+              Send Request
+            </Button>
           </div>
-          <Button onClick={() => handleSendRequest(user.uid)}>Add Friend</Button>
-        </div>
-      ))}
+        ))
+      )}
     </div>
   );
 }

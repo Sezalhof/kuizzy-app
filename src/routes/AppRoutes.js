@@ -1,4 +1,5 @@
 // src/routes/AppRoutes.js
+
 // ✅ 1. Core & library imports
 import React, { Suspense } from "react";
 import { Routes, Route } from "react-router-dom";
@@ -11,7 +12,9 @@ import StudentDashboard from "pages/student/StudentDashboard";
 import Quiz from "components/Quiz";
 import RequireTeacher from "components/RequireTeacher";
 import RequireStudent from "components/RequireStudent";
-import { Link } from "react-router-dom";
+import GroupsPage from "pages/GroupsPage";
+import GroupLeaderboard from "pages/GroupLeaderboard";
+import GroupQuizPage from "pages/GroupQuizPage"; // ✅ FIXED: added this missing import
 
 // ✅ 3. Then dynamic React.lazy() imports
 const Leaderboard = React.lazy(() => import("components/Leaderboard"));
@@ -20,9 +23,7 @@ const AdminDashboard = React.lazy(() => import("pages/admin/AdminDashboard"));
 const TeacherDashboard = React.lazy(() => import("pages/TeacherDashboard"));
 const FriendsPage = React.lazy(() => import("pages/FriendsPage"));
 
-
-
-// Fallback loading UI
+// 🔄 Fallback UI
 const LoadingSpinner = ({ message = "Loading..." }) => (
   <div className="flex flex-col justify-center items-center h-64 space-y-4">
     <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
@@ -57,6 +58,10 @@ export default function AppRoutes({
         <Route path="/leaderboard" element={<Leaderboard data={leaderboardData} />} />
         <Route path="/student-basic" element={<StudentDashboard />} />
 
+        {/* ✅ Group Quiz Route (NEW) */}
+        <Route path="/groups/:groupId/quiz" element={<GroupQuizPage />} />
+        
+
         {/* Quiz - Student Only */}
         <Route
           path="/quiz"
@@ -70,16 +75,16 @@ export default function AppRoutes({
             )
           }
         />
-        
-<Route path="/leaderboard" element={<Leaderboard data={leaderboardData} />} />
 
         {/* Student Dashboard */}
         <Route path="/student" element={<StudentDashboard />} />
 
+        {/* Group Pages */}
+        <Route path="/groups" element={<GroupsPage />} />
+        <Route path="/groups/:groupId/leaderboard" element={<GroupLeaderboard />} />
+
         {/* Friends Page (Student-only protected) */}
-<Route path="/friends" element={<FriendsPage />} />
-
-
+        <Route path="/friends" element={<FriendsPage />} />
 
         {/* Profile Pages */}
         <Route path="/profile" element={<ProfilePage />} />
