@@ -4,7 +4,7 @@ import {
   collection, query, where, getDocs, onSnapshot,
   addDoc, updateDoc, doc, serverTimestamp
 } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+import { db, auth } from '../../kuizzy-app/src/firebase';
 
 export const useFriendRequests = () => {
   const currentUser = auth.currentUser;

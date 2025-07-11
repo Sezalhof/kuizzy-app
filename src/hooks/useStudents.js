@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { db } from "../firebase";
+import { db } from "../../kuizzy-app/src/firebase";
 import { collection, getDocs } from "firebase/firestore";
 
 /**

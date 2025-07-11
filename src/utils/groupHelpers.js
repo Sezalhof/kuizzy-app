@@ -1,39 +1,49 @@
-import { doc, getDoc, updateDoc, arrayUnion, setDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "../firebase";
+// src/utils/groupHelpers.js
+import {
+  collection,
+  doc,
+  getDoc,
+  addDoc,
+  updateDoc,
+  arrayUnion,
+  serverTimestamp,
+} from "firebase/firestore";
+import { db } from "../firebase"; // <-- use relative path inside src/
 
-/**
- * Ensure a user is added to the group's memberIds list.
- * - If group does not exist, create it (for edge cases like testing).
- * - If group exists, ensure user is in the members list.
- *
- * @param {string} groupId - Firestore document ID of the group
- * @param {string} userId - UID of the user to be added
- * @param {string} name - Optional group name (only needed for creation fallback)
- */
-export async function ensureUserInGroup(groupId, userId, name = "Unnamed Group") {
-  if (!groupId || !userId) {
-    console.warn("Missing groupId or userId");
-    return;
-  }
+export async function ensureUserInGroup(groupId, userId) {
+  const ref = doc(db, "groups", groupId);
+  const snap = await getDoc(ref);
 
-  const groupRef = doc(db, "groups", groupId);
-  const groupSnap = await getDoc(groupRef);
+  if (!snap.exists()) return;
 
-  if (!groupSnap.exists()) {
-    console.log("Group does not exist — creating fallback group");
-    await setDoc(groupRef, {
-      name,
-      ownerId: userId,
-      memberIds: [userId],
-      createdAt: serverTimestamp(),
+  const group = snap.data();
+  if (!group.memberIds?.includes(userId)) {
+    await updateDoc(ref, {
+      memberIds: arrayUnion(userId),
     });
-  } else {
-    const groupData = groupSnap.data();
-    if (!groupData.memberIds?.includes(userId)) {
-      console.log("Adding user to group memberIds");
-      await updateDoc(groupRef, {
-        memberIds: arrayUnion(userId),
-      });
-    }
   }
+}
+
+export async function createGroupWithMembers(name, ownerId, memberIds) {
+  const allMembers = Array.from(new Set([ownerId, ...memberIds]));
+  await addDoc(collection(db, "groups"), {
+    name,
+    ownerId,
+    memberIds: allMembers,
+    createdAt: serverTimestamp(),
+  });
+}
+
+export async function batchAddMembers(groupId, newUserIds) {
+  const ref = doc(db, "groups", groupId);
+  await updateDoc(ref, {
+    memberIds: arrayUnion(...newUserIds),
+  });
+}
+
+export async function addMembersToGroup(groupId, members) {
+  const ref = doc(db, "groups", groupId);
+  await updateDoc(ref, {
+    memberIds: arrayUnion(...members),
+  });
 }

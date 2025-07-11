@@ -1,4 +1,3 @@
-// src/hooks/useAuthRedirect.js
 import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
@@ -17,10 +16,15 @@ export function useAuthRedirect(user, loading) {
 
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const incomplete =
-          !data.name || !data.grade || !data.institution || !data.upazila;
+        const isIncomplete =
+          !data.name || !data.phone || !data.grade || !data.school;
 
-        if (incomplete && location.pathname !== "/enroll") {
+        if (isIncomplete && location.pathname !== "/enroll") {
+          navigate("/enroll");
+        }
+      } else {
+        // No document at all — redirect to enroll
+        if (location.pathname !== "/enroll") {
           navigate("/enroll");
         }
       }

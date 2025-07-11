@@ -1,40 +1,58 @@
-// src/pages/FriendsPage.js
 import React, { useState } from "react";
 import FriendList from "../components/friends/FriendList";
+import AddFriendForm from "../components/friends/AddFriendForm";
 import FriendSuggestionList from "../components/friends/FriendSuggestionList";
 
+const tabs = [
+  { key: "friends", label: "🤗 My Teammates" },
+  { key: "pending", label: "📥 Incoming Invites" },
+  { key: "sent", label: "📤 Outgoing Invites" },
+];
+
 export default function FriendsPage() {
-  const [activeTab, setActiveTab] = useState("pending");
+  const [activeTab, setActiveTab] = useState("friends");
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-6">
-      <h1 className="text-2xl font-bold text-center mb-4">Friends</h1>
+    <div className="max-w-4xl mx-auto p-6">
+      <h1 className="text-2xl font-bold text-center text-blue-700 mb-6">
+        🤗 My Teammates
+      </h1>
 
       {/* Tabs */}
-      <div className="flex justify-center mb-6 space-x-4">
-        {["pending", "accepted", "blocked"].map((tab) => (
+      <div className="flex justify-center space-x-6 mb-6 border-b border-gray-300">
+        {tabs.map((tab) => (
           <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`capitalize px-4 py-2 rounded ${
-              activeTab === tab
-                ? "bg-blue-600 text-white"
-                : "bg-gray-100 text-gray-600"
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`px-4 py-2 font-semibold ${
+              activeTab === tab.key
+                ? "border-b-2 border-blue-600 text-blue-600"
+                : "text-gray-600 hover:text-blue-600"
             }`}
           >
-            {tab}
+            {tab.label}
           </button>
         ))}
       </div>
 
-      {/* Friend List */}
-      <FriendList activeTab={activeTab} />
+      {/* Add Friend Form & Suggestions */}
+      {activeTab === "friends" && (
+        <>
+          <div className="mb-6">
+            <AddFriendForm />
+          </div>
 
-      {/* Suggestions */}
-      <div className="mt-10">
-        <h2 className="text-lg font-semibold mb-2">People You May Know</h2>
-        <FriendSuggestionList />
-      </div>
+          <div className="mb-6">
+            <h2 className="text-lg font-semibold mb-3 text-gray-700">
+              💡 Meet Future Teammates
+            </h2>
+            <FriendSuggestionList />
+          </div>
+        </>
+      )}
+
+      {/* Friend List (accepted / pending / sent based on tab) */}
+      <FriendList activeTab={activeTab} />
     </div>
   );
 }

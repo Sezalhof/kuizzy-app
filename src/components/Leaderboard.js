@@ -1,80 +1,118 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../firebase";
 
-const Leaderboard = ({ data }) => {
+export default function Leaderboard({ data, currentUserId }) {
+  const [userDetails, setUserDetails] = useState({});
+
+  useEffect(() => {
+    const fetchUserDetails = async () => {
+      const newDetails = {};
+
+      await Promise.all(
+        data.map(async (entry) => {
+          const uid = entry.userId;
+          if (!uid || newDetails[uid] || userDetails[uid]) return;
+
+          try {
+            const docRef = doc(db, "users", uid);
+            const snap = await getDoc(docRef);
+            if (snap.exists()) {
+              const { name, email } = snap.data();
+              newDetails[uid] = {
+                name: name || "Unknown",
+                email: email || uid,
+              };
+            } else {
+              newDetails[uid] = { name: "Unknown", email: uid };
+            }
+          } catch {
+            newDetails[uid] = { name: "Unknown", email: uid };
+          }
+        })
+      );
+
+      setUserDetails((prev) => ({ ...prev, ...newDetails }));
+    };
+
+    if (data?.length) fetchUserDetails();
+  }, [data, userDetails]);
+
   if (!data || data.length === 0) {
-    return (
-      <p className="text-center text-gray-500">
-        No leaderboard data yet.
-      </p>
-    );
+    return <p className="text-center text-gray-500">No leaderboard data yet.</p>;
   }
 
-  // 🔧 Ensure correct field: use timeTaken or fallback to time
+  // Sort: score desc, then timeTaken asc (faster is better)
   const sortedData = [...data]
     .map((entry) => ({
       ...entry,
-      timeTaken: entry.timeTaken ?? entry.time, // use time if timeTaken is missing
+      timeTaken: entry.timeTaken ?? entry.time ?? 9999,
     }))
     .sort((a, b) => b.score - a.score || a.timeTaken - b.timeTaken)
-    .slice(0, 10); // show top 10 only
+    .slice(0, 10);
 
   return (
     <div className="max-w-2xl mx-auto p-4">
       <h2 className="text-2xl font-bold mb-6 text-center text-blue-700">
         🏆 Top 10 Leaderboard
       </h2>
+
       <div className="overflow-hidden shadow ring-1 ring-black ring-opacity-5 rounded-lg">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Rank
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Email
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Score
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Time Taken
-              </th>
+              <TableHeader title="Rank" />
+              <TableHeader title="Name" />
+              <TableHeader title="Email" />
+              <TableHeader title="Score" />
+              <TableHeader title="Time Taken" />
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {sortedData.map((entry, index) => (
-              <tr key={index} className={index < 3 ? "bg-yellow-50" : ""}>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span
-                    className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                      index === 0
-                        ? "bg-yellow-400 text-white"
-                        : index === 1
-                        ? "bg-gray-400 text-white"
-                        : index === 2
-                        ? "bg-orange-400 text-white"
-                        : "bg-gray-100"
-                    }`}
-                  >
+            {sortedData.map((entry, index) => {
+              const userInfo = userDetails[entry.userId] || {};
+              const isCurrent = currentUserId === entry.userId;
+
+              return (
+                <tr
+                  key={entry.id || index}
+                  className={`${
+                    index === 0
+                      ? "bg-yellow-100"
+                      : index === 1
+                      ? "bg-gray-100"
+                      : index === 2
+                      ? "bg-orange-100"
+                      : ""
+                  } ${isCurrent ? "ring-2 ring-blue-400" : ""}`}
+                >
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-800">
                     {index + 1}
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {entry.email}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  <span className="font-bold">{entry.score}</span> pts
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {entry.timeTaken}s
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {userInfo.name || "Loading..."}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {userInfo.email || entry.userId}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-green-700">
+                    {entry.score} pts
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                    {entry.timeTaken}s
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
     </div>
   );
-};
+}
 
-export default Leaderboard;
+const TableHeader = ({ title }) => (
+  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+    {title}
+  </th>
+);

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { db } from "../../firebase";
+import { db } from "../../../kuizzy-app/src/firebase";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import useAuth from "../../hooks/useAuth";
 

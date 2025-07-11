@@ -1,11 +1,21 @@
+# Node dependencies
 node_modules/
-.env
-dist/
 build/
+dist/
+
+# VS Code junk
+.vscode/
+.idea/
+
+# Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.vscode/
-.idea/
+
+# OS junk
 .DS_Store
 Thumbs.db
+
+# Environment
+.env
+.env.*

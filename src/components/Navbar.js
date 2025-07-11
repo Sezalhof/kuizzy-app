@@ -1,68 +1,82 @@
-// src/components/Navbar.js
 import React from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import fallbackLogo from "../assets/fallback-logo.png";
+import { signOut } from "firebase/auth";
+import { auth } from "../firebase";
 
-export default function Navbar({ user, userRole, onLogout }) {
-  const isStudent = userRole === "student";
-  const isTeacher = userRole === "teacher";
-  const isAdmin = userRole === "admin";
+export default function Navbar({ user, profile, onLogout }) {
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      onLogout?.();
+      navigate("/", { replace: true });
+    } catch (err) {
+      console.error("[Navbar] Logout failed:", err);
+    }
+  };
+
+  const userRole = profile?.role;
 
   return (
-    <nav className="bg-white sticky top-0 z-50 shadow px-4 py-3 flex flex-col sm:flex-row sm:justify-between sm:items-center space-y-2 sm:space-y-0">
-      {/* App name */}
-      <div className="text-xl font-bold text-blue-600">
-        <Link to="/">📚 Kuizzy</Link>
+    <nav className="bg-white shadow-md p-4 flex justify-between items-center">
+      {/* Logo */}
+      <Link to="/" className="flex items-center gap-2">
+        <img src={fallbackLogo} alt="Logo" className="h-8 w-8 rounded-full" />
+        <span className="font-bold text-lg">Kuizzy</span>
+      </Link>
+
+      {/* Links */}
+      <div className="flex gap-4 items-center">
+        <Link to="/" className="hover:underline">Home</Link>
+
+        {user && userRole === "student" && (
+          <>
+            <Link to="/dashboard" className="hover:underline">Dashboard</Link>
+            <Link to="/friends" className="hover:underline">Friends</Link>
+            <Link to="/groups" className="hover:underline">Groups</Link>
+            <Link to="/leaderboard" className="hover:underline">Leaderboard</Link>
+            <Link to="/quiz" className="hover:underline">Quiz</Link>
+          </>
+        )}
+
+        {user && (userRole === "admin" || userRole === "teacher") && (
+          <Link to="/admin" className="hover:underline">Admin Dashboard</Link>
+        )}
+
+        {user && !userRole && (
+          <Link to="/enroll" className="hover:underline">Enroll</Link>
+        )}
       </div>
 
-      {/* Nav links */}
-      <div className="flex flex-wrap justify-center gap-3 text-sm">
-        <Link to="/" className="text-gray-700 hover:text-blue-600">
-          🏠 Home
-        </Link>
-
-        <Link to="/groups" className="text-gray-700 hover:text-blue-600">
-  👥 Team&Result
-</Link>
-
-
-        {isStudent && (
-          <Link to="/quiz" className="text-gray-700 hover:text-blue-600">
-            🎯 Quiz
+      {/* User Section */}
+      <div className="flex items-center gap-3">
+        {user ? (
+          <div className="flex items-center gap-2">
+            <img
+              src={user.photoURL || fallbackLogo}
+              alt="User"
+              className="w-8 h-8 rounded-full"
+            />
+            <span className="text-sm font-medium truncate max-w-[150px]">
+              {profile?.name || user.displayName || user.email}
+            </span>
+            <button
+              onClick={handleLogout}
+              className="ml-2 bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600 text-sm"
+            >
+              Logout
+            </button>
+          </div>
+        ) : (
+          <Link
+            to="/"
+            className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 text-sm"
+          >
+            Login
           </Link>
         )}
-
-        <Link to="/leaderboard" className="text-gray-700 hover:text-blue-600">
-          🏆 Leaderboard
-        </Link>
-
-        {isStudent && (
-          <Link to="/friends" className="text-gray-700 hover:text-blue-600">
-            🤝 Friends
-          </Link>
-        )}
-
-        <Link to="/profile" className="text-gray-700 hover:text-blue-600">
-          👤 Profile
-        </Link>
-
-        {isAdmin && (
-          <Link to="/admin" className="text-gray-700 hover:text-yellow-600">
-            🛠️ Admin
-          </Link>
-        )}
-
-        {isTeacher && (
-          <Link to="/teacher" className="text-gray-700 hover:text-indigo-600">
-            📘 Teacher
-          </Link>
-        )}
-
-        <button
-          onClick={onLogout}
-          className="text-red-600 hover:underline"
-        >
-          🚪 Sign Out
-        </button>
       </div>
     </nav>
   );

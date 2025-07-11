@@ -2,8 +2,17 @@ import React, { useEffect, useState } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useNavigate } from 'react-router-dom';
+import useAuth from '../hooks/useAuth';
+import { useUserProfile } from '../hooks/useUserProfile';
 
-export default function EditProfilePage({ user }) {
+export default function EditProfilePage() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { profile, loading: profileLoading } = useUserProfile(user?.uid);
+  console.log("📄 [EnrollPage] UID:", user?.uid);
+  console.log("🧬 [EnrollPage] Profile:", profile);
+  console.log("⏳ [EnrollPage] Profile Loading:", profileLoading);
+
   const [formData, setFormData] = useState({
     name: '',
     upazila: '',
@@ -11,26 +20,20 @@ export default function EditProfilePage({ user }) {
     grade: ''
   });
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchProfile = async () => {
-      if (!user) return;
-      const docRef = doc(db, 'users', user.uid);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setFormData({
-          name: data.name || '',
-          upazila: data.upazila || '',
-          institution: data.institution || '',
-          grade: data.grade || ''
-        });
-      }
+      if (!user || profileLoading || !profile) return;
+      setFormData({
+        name: profile.name || '',
+        upazila: profile.upazila || '',
+        institution: profile.institution || '',
+        grade: profile.grade || ''
+      });
       setLoading(false);
     };
     fetchProfile();
-  }, [user]);
+  }, [user, profile, profileLoading]);
 
   const handleChange = (e) => {
     setFormData(prev => ({
@@ -53,7 +56,7 @@ export default function EditProfilePage({ user }) {
     navigate('/profile');
   };
 
-  if (loading) return <p className="text-center mt-10">Loading...</p>;
+  if (loading || profileLoading) return <p className="text-center mt-10">Loading...</p>;
 
   return (
     <form onSubmit={handleSubmit} className="max-w-lg mx-auto mt-10 p-6 bg-white rounded-2xl shadow-md space-y-4">

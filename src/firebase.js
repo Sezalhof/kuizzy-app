@@ -1,6 +1,6 @@
-// src/firebase.js
+// ✅ FILE: src/firebase.js
 
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
@@ -14,8 +14,8 @@ const firebaseConfig = {
   appId: "1:539841603951:web:c013ba0b82de73125e209a",
 };
 
-// ✅ Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// ✅ Prevent duplicate initialization
+const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 
 // ✅ Export Firebase services
 export const auth = getAuth(app);
@@ -25,8 +25,5 @@ export const db = getFirestore(app);
 // ✅ Optional: export app if any hook needs it
 export { app };
 
-
-
-
-
+// ✅ Global UID getter (optional for debugging)
 window.getCurrentUid = () => getAuth().currentUser?.uid;

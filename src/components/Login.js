@@ -1,5 +1,5 @@
 import React from 'react';
-import { auth, provider } from '../firebase';
+import { auth, provider } from '../../kuizzy-app/src/firebase';
 import { signInWithPopup } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 

@@ -1,6 +1,6 @@
 import React from "react";
 import { doc, updateDoc, arrayRemove } from "firebase/firestore";
-import { db } from "../firebase";
+import { db } from "../../firebase";
 import useAuth from "../hooks/useAuth";
 
 export default function GroupCard({ group, onLeft }) {

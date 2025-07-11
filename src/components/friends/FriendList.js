@@ -1,5 +1,4 @@
-// src/components/friends/FriendList.js
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from "react";
 import {
   collection,
   query,
@@ -7,83 +6,205 @@ import {
   onSnapshot,
   getDoc,
   doc,
-  or,
-  and
-} from 'firebase/firestore';
-import { db } from '../../firebase';
-import FriendCard from './FriendCard';
-import useAuth from 'hooks/useAuth';
+} from "firebase/firestore";
+import { db } from "../../firebase";
+import useAuth from "../../hooks/useAuth";
+import FriendListCard from "./FriendListCard";
+import FriendSentCard from "./FriendSentCard";
+import FriendPendingCard from "./FriendPendingCard";
 
-export default function FriendList({ activeTab }) {
-  const [friends, setFriends] = useState([]);
+const FriendList = ({ activeTab }) => {
   const { user } = useAuth();
+  const [friends, setFriends] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user?.uid || !activeTab) return;
 
-    const baseRef = collection(db, 'friend_requests');
-    let q;
+    setLoading(true);
+    const friendRequestsRef = collection(db, "friend_requests");
+    let unsubscribe;
 
-    if (activeTab === 'accepted') {
-      q = query(
-        baseRef,
-        and(
-          or(where('toId', '==', user.uid), where('fromId', '==', user.uid)),
-          where('status', '==', 'accepted')
-        )
+    if (activeTab === "friends") {
+      const qTo = query(
+        friendRequestsRef,
+        where("toId", "==", user.uid),
+        where("status", "==", "accepted")
       );
+      const qFrom = query(
+        friendRequestsRef,
+        where("fromId", "==", user.uid),
+        where("status", "==", "accepted")
+      );
+
+      let resultsTo = [];
+      let resultsFrom = [];
+
+      const unsubTo = onSnapshot(qTo, (snapshot) => {
+        resultsTo = snapshot.docs;
+        combineResults();
+      });
+
+      const unsubFrom = onSnapshot(qFrom, (snapshot) => {
+        resultsFrom = snapshot.docs;
+        combineResults();
+      });
+
+      const combineResults = async () => {
+        const combinedDocs = Array.from(
+          new Map(
+            [...resultsTo, ...resultsFrom].map((docSnap) => [docSnap.id, docSnap])
+          ).values()
+        );
+
+        if (combinedDocs.length === 0) {
+          setFriends([]);
+          setLoading(false);
+          return;
+        }
+
+        try {
+          const friendDataPromises = combinedDocs.map(async (docSnap) => {
+            const data = docSnap.data();
+            const otherUserId = data.fromId === user.uid ? data.toId : data.fromId;
+            const userDoc = await getDoc(doc(db, "users", otherUserId));
+            const userInfo = userDoc.exists() ? userDoc.data() : {};
+
+            return {
+              id: docSnap.id,
+              ...data,
+              friendUid: otherUserId,
+              friendName: userInfo.name || "Unknown User",
+              friendEmail: userInfo.email || "",
+              friendPhone: userInfo.phone || "",
+            };
+          });
+
+          const friendData = await Promise.all(friendDataPromises);
+          setFriends(friendData);
+          setLoading(false);
+        } catch (error) {
+          console.error("[FriendList] Firestore error:", error);
+          setFriends([]);
+          setLoading(false);
+        }
+      };
+
+      unsubscribe = () => {
+        unsubTo();
+        unsubFrom();
+      };
     } else {
-      q = query(
-        baseRef,
-        and(where('toId', '==', user.uid), where('status', '==', activeTab.toLowerCase()))
+      let q;
+
+      if (activeTab === "pending") {
+        q = query(
+          friendRequestsRef,
+          where("toId", "==", user.uid),
+          where("status", "==", "pending")
+        );
+      } else if (activeTab === "sent") {
+        q = query(
+          friendRequestsRef,
+          where("fromId", "==", user.uid),
+          where("status", "==", "pending")
+        );
+      } else {
+        setFriends([]);
+        setLoading(false);
+        return;
+      }
+
+      unsubscribe = onSnapshot(
+        q,
+        async (snapshot) => {
+          if (snapshot.empty) {
+            setFriends([]);
+            setLoading(false);
+            return;
+          }
+
+          try {
+            const friendDataPromises = snapshot.docs.map(async (docSnap) => {
+              const data = docSnap.data();
+              const otherUserId = data.fromId === user.uid ? data.toId : data.fromId;
+              const userDoc = await getDoc(doc(db, "users", otherUserId));
+              const userInfo = userDoc.exists() ? userDoc.data() : {};
+
+              return {
+                id: docSnap.id,
+                ...data,
+                friendUid: otherUserId,
+                friendName: userInfo.name || "Unknown User",
+                friendEmail: userInfo.email || "",
+                friendPhone: userInfo.phone || "",
+              };
+            });
+
+            const friendData = await Promise.all(friendDataPromises);
+            setFriends(friendData);
+            setLoading(false);
+          } catch (error) {
+            console.error("[FriendList] Firestore error:", error);
+            setFriends([]);
+            setLoading(false);
+          }
+        },
+        (error) => {
+          console.error("[FriendList] Firestore error:", error);
+          setFriends([]);
+          setLoading(false);
+        }
       );
     }
 
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const data = await Promise.all(
-        snapshot.docs.map(async (docSnap) => {
-          const data = docSnap.data();
-
-          // Mutual logic: figure out the other person
-          const otherUserId = data.fromId === user.uid ? data.toId : data.fromId;
-          const userDoc = await getDoc(doc(db, 'users', otherUserId));
-          const userInfo = userDoc.exists() ? userDoc.data() : {};
-
-          return {
-            id: docSnap.id,
-            ...data,
-            name: userInfo.name || 'Unknown',
-            email: userInfo.email || '',
-            fromId: data.fromId,
-            toId: data.toId,
-            status: data.status,
-          };
-        })
-      );
-      setFriends(data);
-    });
-
-    return () => unsubscribe();
+    return () => unsubscribe && unsubscribe();
   }, [activeTab, user?.uid]);
 
   if (!user?.uid) {
-    return <div className="text-center text-gray-400">Loading user data...</div>;
+    return <div className="text-center text-gray-500">Loading user data...</div>;
+  }
+
+  if (loading) {
+    return (
+      <div className="text-center text-gray-500">Loading {activeTab}...</div>
+    );
+  }
+
+  if (friends.length === 0) {
+    return (
+      <p className="text-center text-gray-400">
+        No {activeTab === "friends" ? "friends" : activeTab} yet.
+      </p>
+    );
   }
 
   return (
     <div className="space-y-3 px-2 sm:px-4">
-      {friends.length === 0 ? (
-        <p className="text-center text-gray-400">No {activeTab} friends.</p>
-      ) : (
-        friends.map((f) => (
-          <FriendCard
-            key={f.id}
-            friend={f}
-            status={activeTab.toLowerCase()}
-            currentUserId={user.uid}
-          />
-        ))
-      )}
+      {friends.map((friend) => {
+        const sharedProps = {
+          id: friend.id,
+          uid: friend.friendUid,
+          name: friend.friendName,
+          email: friend.friendEmail,
+          phone: friend.friendPhone,
+          status: friend.status,
+          fromId: friend.fromId,
+          toId: friend.toId,
+        };
+
+        if (activeTab === "friends") {
+          return <FriendListCard key={friend.id} user={sharedProps} />;
+        } else if (activeTab === "sent") {
+          return <FriendSentCard key={friend.id} request={sharedProps} />;
+        } else if (activeTab === "pending") {
+          return <FriendPendingCard key={friend.id} request={sharedProps} />;
+        }
+
+        return null;
+      })}
     </div>
   );
-}
+};
+
+export default FriendList;

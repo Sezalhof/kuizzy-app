@@ -1,172 +1,198 @@
-// src/components/friends/FriendSuggestionList.js
 import React, { useEffect, useState } from "react";
 import {
   collection,
   query,
   where,
   getDocs,
-  doc,
-  setDoc,
+  addDoc,
+  serverTimestamp,
   getDoc,
+  doc,
 } from "firebase/firestore";
 import { db } from "../../firebase";
 import useAuth from "../../hooks/useAuth";
-import { Button } from "../ui/button";
+import { toast } from "react-toastify";
 
 export default function FriendSuggestionList() {
   const { user } = useAuth();
+  const [userProfile, setUserProfile] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
-  const [userInfo, setUserInfo] = useState(null);
-  const [search, setSearch] = useState("");
-  const [message, setMessage] = useState("");
+  const [sentRequests, setSentRequests] = useState(new Set());
+  const [existingRequests, setExistingRequests] = useState(new Set());
+  const [alreadyFriends, setAlreadyFriends] = useState(new Set());
 
+  // Load current user's profile
   useEffect(() => {
-    const fetchUserInfo = async () => {
+    const fetchProfile = async () => {
       if (!user?.uid) return;
-      const userRef = doc(db, "users", user.uid);
-      const snap = await getDoc(userRef);
-      if (snap.exists()) {
-        setUserInfo(snap.data());
+
+      try {
+        const userDoc = await getDoc(doc(db, "users", user.uid));
+        if (userDoc.exists()) {
+          const profileData = userDoc.data();
+          setUserProfile({ uid: user.uid, ...profileData });
+
+          const friendSet = new Set();
+          if (profileData.friends && Array.isArray(profileData.friends)) {
+            profileData.friends.forEach((f) => {
+              if (typeof f === "string") friendSet.add(f);
+              else if (f?.uid) friendSet.add(f.uid);
+            });
+          }
+          setAlreadyFriends(friendSet);
+        }
+      } catch (err) {
+        toast.error("⚠️ Failed to load your profile.");
       }
     };
-    fetchUserInfo();
-  }, [user?.uid]);
 
+    fetchProfile();
+  }, [user]);
+
+  // Load existing requests (both directions)
   useEffect(() => {
-    const fetchSuggestions = async () => {
-      if (!userInfo?.class || !userInfo?.school) return;
+    const fetchRequests = async () => {
+      if (!user?.uid) return;
 
-      const usersQuery = query(
-        collection(db, "users"),
-        where("class", "==", userInfo.class),
-        where("school", "==", userInfo.school)
-      );
-      const snapshot = await getDocs(usersQuery);
-
-      const results = [];
-      for (const docSnap of snapshot.docs) {
-        if (docSnap.id === user.uid) continue;
-
-        const data = docSnap.data();
-        const otherUserId = docSnap.id;
-        const reqId1 = `${user.uid}_${otherUserId}`;
-        const reqId2 = `${otherUserId}_${user.uid}`;
-        const [req1, req2] = await Promise.all([
-          getDoc(doc(db, "friend_requests", reqId1)),
-          getDoc(doc(db, "friend_requests", reqId2)),
+      try {
+        const [sentSnap, receivedSnap] = await Promise.all([
+          getDocs(query(collection(db, "friend_requests"), where("fromId", "==", user.uid))),
+          getDocs(query(collection(db, "friend_requests"), where("toId", "==", user.uid))),
         ]);
 
-        if (!req1.exists() && !req2.exists()) {
-          results.push({ uid: otherUserId, ...data });
-        }
+        const ids = new Set();
+        sentSnap.forEach((doc) => ids.add(doc.data().toId));
+        receivedSnap.forEach((doc) => ids.add(doc.data().fromId));
+        setExistingRequests(ids);
+      } catch (err) {
+        console.error("Error checking requests:", err);
       }
+    };
 
-      setSuggestions(results);
+    fetchRequests();
+  }, [user]);
+
+  // Load suggestions based on same school and class
+  useEffect(() => {
+    const fetchSuggestions = async () => {
+      if (!user || !userProfile) return;
+
+      try {
+        const snapshot = await getDocs(
+          query(
+            collection(db, "users"),
+            where("school", "==", userProfile.school),
+            where("grade", "==", userProfile.grade)
+          )
+        );
+
+        const potential = [];
+
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          const uid = docSnap.id;
+
+          if (
+            uid === user.uid ||
+            existingRequests.has(uid) ||
+            alreadyFriends.has(uid)
+          ) {
+            return;
+          }
+
+          const suggestion = { uid, ...data };
+
+          if (data.gender === userProfile.gender) {
+            potential.unshift(suggestion);
+          } else {
+            potential.push(suggestion);
+          }
+        });
+
+        setSuggestions(potential);
+      } catch (err) {
+        toast.error("❌ Failed to fetch friend suggestions.");
+      }
     };
 
     fetchSuggestions();
-  }, [userInfo]);
+  }, [user, userProfile, existingRequests, alreadyFriends]);
 
-  const handleSendRequest = async (toUser) => {
-    const requestId = `${user.uid}_${toUser.uid}`;
+  const sendRequest = async (toId) => {
+    if (sentRequests.has(toId)) {
+      toast.info("⚠️ Already requested.");
+      return;
+    }
+
+    const sortedIds = [user.uid, toId].sort();
+    const requestId = `${sortedIds[0]}_${sortedIds[1]}`;
+
     try {
-      await setDoc(doc(db, "friend_requests", requestId), {
+      const existing = await getDoc(doc(db, "friend_requests", requestId));
+      if (existing.exists()) {
+        toast.info("⚠️ Request already exists.");
+        return;
+      }
+
+      await addDoc(collection(db, "friend_requests"), {
         fromId: user.uid,
-        toId: toUser.uid,
+        toId,
         status: "pending",
-        createdAt: new Date(),
+        timestamp: serverTimestamp(),
       });
-      setMessage(`Friend request sent to ${toUser.name || toUser.email}`);
+
+      toast.success("✅ Invite sent!");
+      setSentRequests((prev) => new Set(prev).add(toId));
     } catch (err) {
-      console.error("Send request failed:", err);
-      setMessage("Failed to send friend request");
+      toast.error("❌ Failed to send invite.");
     }
   };
 
-  const handleSearch = async () => {
-    if (!search.trim()) return;
+  if (!user || !userProfile) {
+    return <p className="text-sm text-gray-500">Loading suggestions...</p>;
+  }
 
-    try {
-      const userQuery = query(collection(db, "users"));
-      const snapshot = await getDocs(userQuery);
-      let found = null;
-
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        if (
-          docSnap.id !== user.uid &&
-          (data.email === search.trim() || data.phone === search.trim())
-        ) {
-          found = { uid: docSnap.id, ...data };
-        }
-      });
-
-      if (!found) {
-        setMessage("No user found with that phone or email");
-        return;
-      }
-
-      const reqId1 = `${user.uid}_${found.uid}`;
-      const reqId2 = `${found.uid}_${user.uid}`;
-
-      const [req1, req2] = await Promise.all([
-        getDoc(doc(db, "friend_requests", reqId1)),
-        getDoc(doc(db, "friend_requests", reqId2)),
-      ]);
-
-      if (req1.exists() || req2.exists()) {
-        setMessage("Request already exists or you're already friends.");
-        return;
-      }
-
-      await handleSendRequest(found);
-    } catch (err) {
-      console.error("Search error:", err);
-      setMessage("Error searching user.");
-    }
-  };
+  if (suggestions.length === 0) {
+    return <p className="text-sm text-gray-500">No friend suggestions right now.</p>;
+  }
 
   return (
-    <div className="mt-6 space-y-4">
-      <h2 className="text-lg font-bold">People You May Know</h2>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {suggestions.map((sugg) => {
+        const alreadySent = sentRequests.has(sugg.uid) || existingRequests.has(sugg.uid);
 
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by phone or email"
-          className="border px-3 py-1 rounded text-sm w-full sm:w-64"
-        />
-        <Button size="sm" onClick={handleSearch}>
-          Search
-        </Button>
-      </div>
-
-      {message && (
-        <p className="text-sm text-blue-600 font-medium">{message}</p>
-      )}
-
-      {suggestions.length === 0 ? (
-        <p className="text-sm text-gray-400">No suggestions right now.</p>
-      ) : (
-        suggestions.map((user) => (
+        return (
           <div
-            key={user.uid}
-            className="flex justify-between items-center p-3 bg-white border shadow-sm rounded"
+            key={sugg.uid}
+            className="border p-4 rounded bg-white shadow-sm hover:bg-gray-50 transition"
           >
-            <div>
-              <p className="font-semibold">{user.name}</p>
-              <p className="text-xs text-gray-500">
-                {user.class} • {user.school}
-              </p>
+            <p className="font-semibold text-blue-700">{sugg.name || "Unknown User"}</p>
+            <p className="text-xs text-gray-500">{sugg.email || sugg.uid}</p>
+
+            <div className="flex flex-wrap gap-2 text-xs mt-2">
+              {sugg.gender && (
+                <span className="bg-gray-100 px-2 py-0.5 rounded">👤 {sugg.gender}</span>
+              )}
+              {sugg.grade && (
+                <span className="bg-gray-100 px-2 py-0.5 rounded">📘 Class {sugg.grade}</span>
+              )}
+              <span className="bg-gray-100 px-2 py-0.5 rounded">🏫 {sugg.school}</span>
             </div>
-            <Button size="sm" onClick={() => handleSendRequest(user)}>
-              Send Request
-            </Button>
+
+            <button
+              onClick={() => sendRequest(sugg.uid)}
+              disabled={alreadySent}
+              className={`mt-3 px-3 py-1 rounded text-sm ${
+                alreadySent
+                  ? "bg-gray-300 text-gray-600 cursor-not-allowed"
+                  : "bg-blue-600 text-white hover:bg-blue-700"
+              }`}
+            >
+              {alreadySent ? "🕓 Waiting" : "➕ Invite to Join"}
+            </button>
           </div>
-        ))
-      )}
+        );
+      })}
     </div>
   );
 }

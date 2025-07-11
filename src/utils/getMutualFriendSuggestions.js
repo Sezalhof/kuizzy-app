@@ -1,7 +1,7 @@
 // src/utils/getMutualFriendSuggestions.js
 
 import { collection, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';  // Adjust path if utils is nested, here '../firebase' is assumed
+import { db } from '../firebase';
 
 /**
  * Get mutual friend suggestions for the given user ID (uid).

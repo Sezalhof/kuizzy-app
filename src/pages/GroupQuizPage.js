@@ -1,6 +1,7 @@
+// src/pages/GroupQuizPage.js
 import React from "react";
 import { useParams } from "react-router-dom";
-import Quiz from "../components/Quiz"; // make sure the path is correct!
+import Quiz from "../components/Quiz"; // <-- Adjust relative to be inside src/
 
 export default function GroupQuizPage() {
   const { groupId } = useParams();

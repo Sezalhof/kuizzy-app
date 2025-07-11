@@ -1,5 +1,5 @@
 import { collection, addDoc, query, orderBy, limit, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db } from '../../kuizzy-app/src/firebase';
 
 export const saveResult = async (email, score, time) => {
   try {
