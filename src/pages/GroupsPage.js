@@ -1,3 +1,5 @@
+// ✅ FILE: src/pages/GroupsPage.js
+
 import React, { useEffect, useState } from "react";
 import {
   collection,
@@ -6,24 +8,22 @@ import {
   query,
   where,
   doc,
+  deleteDoc,
+  updateDoc,
 } from "firebase/firestore";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { db } from "../firebase";
 import useAuth from "../hooks/useAuth";
 import { useUserProfile } from "../hooks/useUserProfile";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
-// import GroupCreator from "../components/group/GroupCreator";
-import GroupCreatorModal from "../components/group/GroupCreatorModal";
+import GroupCreator from "../components/group/GroupCreator";
 
 export default function GroupsPage() {
+  const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const validUid = !authLoading && typeof user?.uid === "string" ? user.uid : null;
 
-  const {
-    profile,
-    loading: profileLoading,
-    error: profileError,
-  } = useUserProfile(validUid);
+  const { profile, loading: profileLoading } = useUserProfile(validUid);
 
   const [teams, setTeams] = useState([]);
   const [loadingTeams, setLoadingTeams] = useState(true);
@@ -31,24 +31,10 @@ export default function GroupsPage() {
   const [showGroupModal, setShowGroupModal] = useState(false);
 
   useEffect(() => {
-    // debug logs preserved
-    console.log("👤 [GroupsPage] user:", user);
-    console.log("⏳ [GroupsPage] authLoading:", authLoading);
-    console.log("🧬 [GroupsPage] profile:", profile);
-    console.log("⏳ [GroupsPage] profileLoading:", profileLoading);
-    console.log("⚠️ [GroupsPage] profileError:", profileError);
-  }, [user, authLoading, profile, profileLoading, profileError]);
-
-  useEffect(() => {
     const fetchTeams = async () => {
-      if (!validUid || !profile || profileLoading || authLoading) {
-        console.log("⏭️ [GroupsPage] Skipping fetchTeams — incomplete state");
-        return;
-      }
+      if (!validUid || !profile || profileLoading || authLoading) return;
 
       setLoadingTeams(true);
-      console.log("📥 [GroupsPage] Fetching teams for user:", validUid);
-
       try {
         const groupQuery = query(
           collection(db, "groups"),
@@ -69,15 +55,11 @@ export default function GroupsPage() {
                   return {
                     uid,
                     displayName: userData.name || "Unknown",
-                    className: userData.grade || "N/A",
-                    schoolName: userData.school || "N/A",
                   };
                 } catch {
                   return {
                     uid,
                     displayName: "Unknown",
-                    className: "N/A",
-                    schoolName: "N/A",
                   };
                 }
               })
@@ -91,24 +73,45 @@ export default function GroupsPage() {
           })
         );
 
-        console.log("✅ [GroupsPage] Fetched teams:", teamsWithDetails);
         setTeams(teamsWithDetails);
       } catch (err) {
-        console.error("❌ [GroupsPage] Error loading teams:", err);
-        setError("Failed to load teams.");
+        console.error("[GroupsPage] Failed to load teams:", err);
+        setError("❌ Failed to load teams.");
       } finally {
         setLoadingTeams(false);
-        console.log("✅ [GroupsPage] Finished loading teams");
       }
     };
 
     fetchTeams();
   }, [validUid, profile, profileLoading, authLoading]);
 
-  const handleCopyLink = (groupId) => {
-    const url = `${window.location.origin}/group-invite/${groupId}`;
-    navigator.clipboard.writeText(url);
-    alert("✅ Invite link copied to clipboard!");
+  const handleDeleteGroup = async (groupId) => {
+    const confirm = window.confirm("Are you sure you want to delete this group?");
+    if (!confirm) return;
+
+    try {
+      await deleteDoc(doc(db, "groups", groupId));
+      setTeams((prev) => prev.filter((team) => team.id !== groupId));
+    } catch (err) {
+      console.error("Failed to delete group:", err);
+      alert("❌ Failed to delete group.");
+    }
+  };
+
+  const handleLeaveGroup = async (groupId, currentMembers) => {
+    const confirm = window.confirm("Leave this group?");
+    if (!confirm) return;
+
+    try {
+      const updated = currentMembers.filter((uid) => uid !== validUid);
+      await updateDoc(doc(db, "groups", groupId), {
+        memberIds: updated,
+      });
+      setTeams((prev) => prev.filter((team) => team.id !== groupId));
+    } catch (err) {
+      console.error("Leave group error:", err);
+      alert("❌ Failed to leave group.");
+    }
   };
 
   if (authLoading || profileLoading || loadingTeams) {
@@ -123,15 +126,24 @@ export default function GroupsPage() {
     );
   }
 
-  const acceptedFriends = profile.friends?.filter((f) => f.status === "accepted") || [];
+  const acceptedFriends =
+    profile.friends?.filter((f) => f.status === "accepted") || [];
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
+      {/* Back button */}
+      <button
+        onClick={() => navigate(-1)}
+        className="mb-4 text-blue-600 hover:underline text-sm"
+      >
+        ← Back
+      </button>
+
       <h1 className="text-2xl font-bold text-center text-blue-700 mb-6">
         ✅ My Teams
       </h1>
 
-      {/* Button to open modal */}
+      {/* Create Team */}
       <div className="text-center mb-6">
         <button
           onClick={() => setShowGroupModal(true)}
@@ -141,67 +153,109 @@ export default function GroupsPage() {
         </button>
       </div>
 
-      {/* Group creation modal */}
-      {showGroupModal && <GroupCreatorModal onClose={() => setShowGroupModal(false)} />}
+      {/* Modal */}
+      {showGroupModal && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setShowGroupModal(false)}
+        >
+          <div
+            className="relative bg-white rounded-lg p-4 w-full max-w-md"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setShowGroupModal(false)}
+              className="absolute top-2 right-2 text-gray-600 hover:text-red-500 text-xl"
+              title="Close"
+            >
+              ×
+            </button>
+            <GroupCreator onClose={() => setShowGroupModal(false)} />
+          </div>
+        </div>
+      )}
 
       {error && <div className="text-red-500 text-center mt-4">{error}</div>}
 
-      {/* Teams list */}
+      {/* Team Cards */}
       <div className="mt-8 grid gap-4">
         {teams.length === 0 ? (
           <p className="text-center text-gray-500">
             You're not part of any teams yet.
           </p>
         ) : (
-          teams.map((team) => (
-            <div
-              key={team.id}
-              className="border rounded-lg p-4 shadow-sm bg-white"
-            >
-              <h2 className="text-lg font-semibold text-gray-800">{team.name}</h2>
-              <p className="text-sm text-gray-500 mb-2">
-                Members: {team.membersDetailed.length}
-              </p>
+          teams.map((team) => {
+            const groupUid = team.groupUid || team.id; // fallback for legacy groups
 
-              <div className="flex flex-wrap gap-2 mt-2">
-                <Link
-                  to={`/group-quiz/${team.id}`}
-                  className="bg-green-600 text-white text-sm px-3 py-1 rounded hover:bg-green-700"
-                >
-                  📝 Take Quiz
-                </Link>
+            return (
+              <div
+                key={team.id}
+                className="border rounded-lg p-4 shadow-sm bg-white"
+              >
+                <h2 className="text-lg font-semibold text-gray-800">
+                  {team.name}
+                </h2>
+                <p className="text-sm text-gray-500 mb-2">
+                  Members: {team.membersDetailed.length}
+                </p>
 
-                <Link
-                  to={`/group-members/${team.id}`}
-                  className="bg-yellow-500 text-white text-sm px-3 py-1 rounded hover:bg-yellow-600"
-                >
-                  👥 Show Members
-                </Link>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  <Link
+                    to={`/group-quiz/${groupUid}`}
+                    className="bg-green-600 text-white text-sm px-3 py-1 rounded hover:bg-green-700"
+                  >
+                    📝 Take A Test
+                  </Link>
 
-                <Link
-                  to={`/group-leaderboard/${team.id}`}
-                  className="bg-purple-600 text-white text-sm px-3 py-1 rounded hover:bg-purple-700"
-                >
-                  🏆 Leaderboard
-                </Link>
+                  <Link
+                    to={`/group-members/${groupUid}`}
+                    className="bg-yellow-500 text-white text-sm px-3 py-1 rounded hover:bg-yellow-600"
+                  >
+                    🛡️ Show fighters
+                  </Link>
 
-                <button
-                  onClick={() => handleCopyLink(team.id)}
-                  className="bg-gray-200 text-gray-800 text-sm px-3 py-1 rounded hover:bg-gray-300"
-                >
-                  🔗 Copy Invite Link
-                </button>
+                  <Link
+                    to={`/group-leaderboard/${groupUid}`}
+                    className="bg-purple-600 text-white text-sm px-3 py-1 rounded hover:bg-purple-700"
+                  >
+                    🏆 Leaderboard
+                  </Link>
+
+                  {team.ownerId === validUid && team.memberIds?.length === 1 && (
+                    <button
+                      onClick={() => handleDeleteGroup(team.id)}
+                      className="bg-red-600 text-white text-sm px-3 py-1 rounded hover:bg-red-700"
+                    >
+                      🗑️ Delete Group
+                    </button>
+                  )}
+
+                  {team.ownerId !== validUid &&
+                    team.memberIds?.includes(validUid) && (
+                      <button
+                        onClick={() => handleLeaveGroup(team.id, team.memberIds)}
+                        className="bg-gray-600 text-white text-sm px-3 py-1 rounded hover:bg-gray-700"
+                      >
+                        🚪 Leave Group
+                      </button>
+                    )}
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
-      {/* --- New section: Accepted Friends --- */}
+      {/* Guest Room */}
       <div className="mt-12">
-        <h2 className="text-xl font-semibold text-blue-700 mb-4">Your Accepted Friends</h2>
+        <h2 className="text-xl font-semibold text-blue-700 mb-4">
+          🏡 Your teammates in the Guest Room ({acceptedFriends.length})
+        </h2>
+
         {acceptedFriends.length === 0 ? (
-          <p className="text-gray-500">You have no accepted friends yet.</p>
+          <p className="text-gray-500">
+            No teammates in the Guest Room yet 💺👀
+          </p>
         ) : (
           <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             {acceptedFriends.map((friend) => (
@@ -209,9 +263,8 @@ export default function GroupsPage() {
                 key={friend.uid}
                 className="border rounded p-3 shadow-sm bg-white"
               >
-                <p className="font-semibold">{friend.name || "Unnamed Friend"}</p>
-                <p className="text-sm text-gray-600">
-                  Class: {friend.grade || "N/A"} | School: {friend.school || "N/A"}
+                <p className="font-semibold">
+                  {friend.name || "Unnamed Guest"}
                 </p>
               </li>
             ))}

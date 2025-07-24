@@ -16,7 +16,7 @@ import FriendRequestCard from "./FriendRequestCard";
 import FriendSentCard from "./FriendSentCard";
 
 const tabs = [
-  { key: "friends", label: "Friends" },
+  { key: "friends", label: "🏡 Guest Room" },
   { key: "pending", label: "Incoming Requests" },
   { key: "sent", label: "Sent Requests" },
 ];

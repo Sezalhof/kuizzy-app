@@ -3,9 +3,9 @@ import React from "react";
 export default function AddFriendsToGroup({ friendsToAdd, onAdd }) {
   return (
     <div>
-      <h3 className="text-md font-semibold mb-2">Add More Friends:</h3>
+      <h3 className="text-md font-semibold mb-2">Add More Guests👥:</h3>
       {friendsToAdd.length === 0 ? (
-        <p className="text-gray-400 text-sm">No available friends to add.</p>
+        <p className="text-gray-400 text-sm">Invite👥to the Guest Room first!</p>
       ) : (
         <div className="grid grid-cols-2 gap-2">
           {friendsToAdd.map((f) => (

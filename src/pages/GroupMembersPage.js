@@ -96,7 +96,7 @@ export default function GroupMembersPage() {
   };
 
   if (loading || profileLoading) {
-    return <p className="text-center mt-6">Loading group members...</p>;
+    return <p className="text-center mt-6">Loading real fighters...</p>;
   }
 
   if (error || profileError) {

@@ -44,7 +44,7 @@ export default function FriendsPage() {
 
           <div className="mb-6">
             <h2 className="text-lg font-semibold mb-3 text-gray-700">
-              💡 Meet Future Teammates
+              💡 Meet Future Teammates!
             </h2>
             <FriendSuggestionList />
           </div>

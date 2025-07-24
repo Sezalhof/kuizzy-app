@@ -73,7 +73,7 @@ export default function FriendListCard({ user }) {
               📘 Class {userInfo.class}
             </span>
           )}
-          <span className="bg-green-100 px-2 py-0.5 rounded">✅ Friend</span>
+          <span className="bg-green-100 px-2 py-0.5 rounded"> 👤 Guest </span>
         </div>
       </div>
 
@@ -89,3 +89,5 @@ export default function FriendListCard({ user }) {
     </div>
   );
 }
+
+

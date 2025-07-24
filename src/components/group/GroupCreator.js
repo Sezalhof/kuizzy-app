@@ -1,11 +1,13 @@
-import React, { useEffect, useState } from "react";
+// ✅ FILE: src/components/group/GroupCreator.js
+
+import React, { useState, useEffect } from "react";
 import {
   collection,
-  query,
-  where,
-  getDocs,
   doc,
+  getDocs,
+  query,
   setDoc,
+  where,
 } from "firebase/firestore";
 import { db } from "../../firebase";
 import useAuth from "../../hooks/useAuth";
@@ -13,85 +15,89 @@ import { Button } from "../ui/button";
 
 export default function GroupCreator({ onClose }) {
   const { user } = useAuth();
+  const [groupName, setGroupName] = useState("");
   const [friends, setFriends] = useState([]);
   const [selectedFriends, setSelectedFriends] = useState([]);
-  const [groupName, setGroupName] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
   const [message, setMessage] = useState("");
 
   useEffect(() => {
     const fetchAcceptedFriends = async () => {
       if (!user?.uid) return;
-
       try {
-        const q = query(
+        const sentQuery = query(
           collection(db, "friend_requests"),
-          where("status", "==", "accepted")
+          where("status", "==", "accepted"),
+          where("fromId", "==", user.uid)
         );
-        const snapshot = await getDocs(q);
-        const ids = new Set();
-        const friendList = [];
+        const recvQuery = query(
+          collection(db, "friend_requests"),
+          where("status", "==", "accepted"),
+          where("toId", "==", user.uid)
+        );
 
-        for (let docSnap of snapshot.docs) {
-          const data = docSnap.data();
-          const isMe = data.fromId === user.uid || data.toId === user.uid;
-          if (!isMe) continue;
+        const sentSnapshot = await getDocs(sentQuery);
+        const recvSnapshot = await getDocs(recvQuery);
 
-          const friendId = data.fromId === user.uid ? data.toId : data.fromId;
+        const friendIds = new Set();
+        sentSnapshot.forEach((doc) => friendIds.add(doc.data().toId));
+        recvSnapshot.forEach((doc) => friendIds.add(doc.data().fromId));
 
-          if (!ids.has(friendId)) {
-            ids.add(friendId);
-
-            const userDocSnap = await getDocs(
-              query(collection(db, "users"), where("__name__", "==", friendId))
-            );
-            userDocSnap.forEach((d) =>
-              friendList.push({ uid: d.id, ...d.data() })
-            );
-          }
+        const loaded = [];
+        for (const friendId of friendIds) {
+          const userQuery = query(
+            collection(db, "users"),
+            where("__name__", "==", friendId)
+          );
+          const userSnap = await getDocs(userQuery);
+          userSnap.forEach((d) => loaded.push({ uid: d.id, ...d.data() }));
         }
-
-        setFriends(friendList);
+        setFriends(loaded);
       } catch (err) {
-        console.error("Error loading friends:", err);
-        setMessage("❌ Failed to fetch friends.");
+        console.error("Error fetching guests:", err);
+        setMessage("❌ Failed to load guests.");
       }
     };
-
     fetchAcceptedFriends();
   }, [user?.uid]);
 
+  const filteredFriends = friends.filter((f) => {
+    const term = searchTerm.toLowerCase();
+    return (
+      (f.name || "").toLowerCase().includes(term) ||
+      (f.email || "").toLowerCase().includes(term) ||
+      (f.phone || "").includes(term)
+    );
+  });
+
   const toggleFriend = (uid) => {
     setSelectedFriends((prev) =>
-      prev.includes(uid)
-        ? prev.filter((id) => id !== uid)
-        : [...prev, uid]
+      prev.includes(uid) ? prev.filter((id) => id !== uid) : [...prev, uid]
     );
   };
 
-  const handleCreateGroup = async () => {
-    if (!groupName.trim()) {
-      return setMessage("⚠️ Group name is required.");
-    }
-    if (selectedFriends.length === 0) {
-      return setMessage("⚠️ Please select at least one friend.");
+  const handleCreate = async () => {
+    if (!groupName.trim() || selectedFriends.length === 0) {
+      setMessage("⚠️ Please enter a name and select guests.");
+      return;
     }
 
-    const groupId = `${user.uid}_${Date.now()}`;
+    const groupUid = crypto.randomUUID(); // ✅ Fully random, no UID involved
+
     try {
-      await setDoc(doc(db, "groups", groupId), {
-        id: groupId,
+      await setDoc(doc(db, "groups", groupUid), {
+        id: groupUid,
+        groupUid,
         name: groupName,
         ownerId: user.uid,
         memberIds: [user.uid, ...selectedFriends],
         createdAt: Date.now(),
-        photoURL: "", // placeholder for now
       });
 
-      setMessage("✅ Group created!");
+      setMessage("✅ Team created successfully!");
       setGroupName("");
       setSelectedFriends([]);
-
-      if (onClose) onClose();
+      onClose?.();
     } catch (err) {
       console.error("Error creating group:", err);
       setMessage("❌ Failed to create group.");
@@ -99,56 +105,70 @@ export default function GroupCreator({ onClose }) {
   };
 
   return (
-    <div className="p-4 space-y-4">
-      <h2 className="text-xl font-bold text-blue-700">Create a Team</h2>
+    <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full">
+      <h2 className="text-xl font-bold text-blue-700 mb-4 text-center">
+        Create a Team
+      </h2>
 
       <input
         type="text"
+        placeholder="Enter team name"
         value={groupName}
         onChange={(e) => setGroupName(e.target.value)}
-        placeholder="Enter team name"
-        className="border px-3 py-2 rounded w-full"
+        className="w-full px-3 py-2 mb-4 border rounded"
       />
 
-      <div>
-        <h3 className="font-semibold mb-1">Select Members</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto">
-          {friends.length === 0 ? (
-            <p className="text-sm text-gray-500">No accepted friends found.</p>
-          ) : (
-            friends.map((friend) => (
-              <label
-                key={friend.uid}
-                className={`flex items-center gap-2 border p-2 rounded cursor-pointer ${
-                  selectedFriends.includes(friend.uid)
-                    ? "bg-blue-50 border-blue-300"
-                    : ""
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedFriends.includes(friend.uid)}
-                  onChange={() => toggleFriend(friend.uid)}
-                />
-                <div>
-                  <p className="font-medium">
-                    {friend.name || "Unknown User"}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {friend.email || friend.phone || "No contact info"}
-                  </p>
-                </div>
-              </label>
-            ))
-          )}
-        </div>
-      </div>
+      <input
+        type="text"
+        placeholder="🔍 Search guests"
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        className="w-full px-3 py-2 mb-4 border rounded"
+      />
 
-      <Button onClick={handleCreateGroup}>Create Team</Button>
+      {filteredFriends.length === 0 ? (
+        <p className="text-sm text-gray-500 mb-4">No guests found.</p>
+      ) : (
+        <div className="max-h-[280px] overflow-y-auto mb-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {filteredFriends.map((friend) => (
+            <label
+              key={friend.uid}
+              className={`flex items-center gap-2 p-2 border rounded cursor-pointer ${
+                selectedFriends.includes(friend.uid)
+                  ? "bg-blue-50 border-blue-300"
+                  : ""
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={selectedFriends.includes(friend.uid)}
+                onChange={() => toggleFriend(friend.uid)}
+              />
+              {friend.photoURL && (
+                <img
+                  src={friend.photoURL}
+                  alt="avatar"
+                  className="w-8 h-8 rounded-full"
+                />
+              )}
+              <div>
+                <p className="font-medium">{friend.name || "Unnamed Guest"}</p>
+                <p className="text-xs text-gray-500">
+                  {friend.email || friend.phone || "No contact info"}
+                </p>
+              </div>
+            </label>
+          ))}
+        </div>
+      )}
 
       {message && (
-        <p className="text-sm mt-2 text-center text-blue-600">{message}</p>
+        <p className="text-center text-sm text-blue-600 mb-2">{message}</p>
       )}
+
+      <div className="flex justify-end gap-3">
+        <Button onClick={handleCreate}>Create Team</Button>
+      </div>
     </div>
   );
 }

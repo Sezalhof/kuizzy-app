@@ -1,4 +1,4 @@
-// src/pages/EnrollPage.js
+// FILE: src/pages/EnrollPage.js
 
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
@@ -9,7 +9,6 @@ import { updateUserProfile } from "../utils/firestoreUtils";
 export default function EnrollPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-
   const uid = user?.uid || null;
   const { profile, loading: profileLoading } = useUserProfile(uid);
 
@@ -25,17 +24,18 @@ export default function EnrollPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // Pre-fill form if profile partially exists
+  // Pre-fill form with existing profile values
   useEffect(() => {
     if (profile && !profileLoading) {
-      setFormData({
+      setFormData((prev) => ({
+        ...prev,
         name: profile.name || "",
         phone: profile.phone || "",
         countryCode: profile.countryCode || "+88",
         school: profile.school || "",
         grade: profile.grade || "",
         role: profile.role || "student",
-      });
+      }));
     }
   }, [profile, profileLoading]);
 
@@ -43,16 +43,15 @@ export default function EnrollPage() {
   useEffect(() => {
     if (
       profile?.name &&
-      profile?.role &&
+      profile?.phone &&
       profile?.school &&
       profile?.grade &&
-      profile?.phone
+      profile?.role
     ) {
       navigate("/dashboard", { replace: true });
     }
   }, [profile, navigate]);
 
-  // Show loading while UID or profile is loading
   if (!uid || profileLoading) {
     return (
       <div className="flex items-center justify-center h-screen text-gray-500">
@@ -66,7 +65,7 @@ export default function EnrollPage() {
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
-    if (error) setError(""); // Clear error on input change
+    if (error) setError("");
   };
 
   const handleSubmit = async (e) => {
@@ -89,12 +88,12 @@ export default function EnrollPage() {
         school,
         grade,
         role,
-        email: user?.email || "", // ✅ Automatically pulled from Firebase Auth
+        email: user?.email || "",
         createdAt: profile?.createdAt ?? Date.now(),
       });
       navigate("/dashboard");
     } catch (err) {
-      setError("Failed to save profile. Please try again.");
+      setError("❌ Failed to save profile. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -103,7 +102,11 @@ export default function EnrollPage() {
   return (
     <div className="max-w-md mx-auto mt-10 p-6 bg-white shadow rounded-xl">
       <h2 className="text-2xl font-semibold text-center mb-6">Complete Your Profile</h2>
-      {error && <div className="mb-4 text-red-500 text-sm" role="alert">{error}</div>}
+      {error && (
+        <div className="mb-4 text-red-500 text-sm" role="alert">
+          {error}
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="space-y-4" aria-describedby="form-instructions">
         <input
           name="name"
@@ -112,8 +115,8 @@ export default function EnrollPage() {
           value={formData.name}
           onChange={handleChange}
           className="w-full p-2 border rounded"
-          aria-required="true"
           aria-label="Full Name"
+          required
         />
         <div className="flex space-x-2">
           <input
@@ -123,7 +126,7 @@ export default function EnrollPage() {
             onChange={handleChange}
             className="w-1/3 p-2 border rounded"
             aria-label="Country Code"
-            aria-required="true"
+            required
           />
           <input
             name="phone"
@@ -132,8 +135,8 @@ export default function EnrollPage() {
             value={formData.phone}
             onChange={handleChange}
             className="w-2/3 p-2 border rounded"
-            aria-required="true"
             aria-label="Phone Number"
+            required
           />
         </div>
         <input
@@ -143,8 +146,8 @@ export default function EnrollPage() {
           value={formData.school}
           onChange={handleChange}
           className="w-full p-2 border rounded"
-          aria-required="true"
           aria-label="School Name"
+          required
         />
         <input
           name="grade"
@@ -153,16 +156,16 @@ export default function EnrollPage() {
           value={formData.grade}
           onChange={handleChange}
           className="w-full p-2 border rounded"
-          aria-required="true"
           aria-label="Class or Grade"
+          required
         />
         <select
           name="role"
           value={formData.role}
           onChange={handleChange}
           className="w-full p-2 border rounded"
-          aria-required="true"
           aria-label="Role"
+          required
         >
           <option value="student">Student</option>
           <option value="teacher">Teacher</option>

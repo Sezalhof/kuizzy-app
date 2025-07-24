@@ -1,7 +1,5 @@
-// ✅ FILE: src/components/Quiz.js
-
-import React, { useState } from "react";
-import { addDoc, collection } from "firebase/firestore";
+import React, { useState, useEffect } from "react";
+import { addDoc, collection, doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import useAuth from "../hooks/useAuth";
 import { toast } from "react-toastify";
@@ -16,45 +14,45 @@ export default function Quiz({ groupId = null, onComplete }) {
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [startTime, setStartTime] = useState(Date.now());
+  const [groupUid, setGroupUid] = useState(null); // 🔹 added
 
   const questions = [
-    {
-      id: 1,
-      question: "What is 2 + 2?",
-      options: ["3", "4", "5", "6"],
-      correctAnswer: "4",
-    },
-    {
-      id: 2,
-      question: "Capital of Bangladesh?",
-      options: ["Chittagong", "Barisal", "Dhaka", "Sylhet"],
-      correctAnswer: "Dhaka",
-    },
-    {
-      id: 3,
-      question: "React is a ___ library?",
-      options: ["Python", "CSS", "JavaScript", "PHP"],
-      correctAnswer: "JavaScript",
-    },
+    { id: 1, question: "What is 2 + 2?", options: ["3", "4", "5", "6"], correctAnswer: "4" },
+    { id: 2, question: "Capital of Bangladesh?", options: ["Chittagong", "Barisal", "Dhaka", "Sylhet"], correctAnswer: "Dhaka" },
+    { id: 3, question: "React is a ___ library?", options: ["Python", "CSS", "JavaScript", "PHP"], correctAnswer: "JavaScript" },
   ];
 
   const [questionIndex, setQuestionIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState(null);
   const [feedback, setFeedback] = useState(null);
-
   const currentQuestion = questions[questionIndex];
+
+  // 🔹 Load groupUid on mount
+  useEffect(() => {
+    const fetchGroupUid = async () => {
+      if (!groupId) return;
+      try {
+        const docSnap = await getDoc(doc(db, "groups", groupId));
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setGroupUid(data.groupUid || groupId); // fallback to doc ID
+        }
+      } catch (err) {
+        console.error("[Quiz] Failed to fetch groupUid:", err);
+      }
+    };
+    fetchGroupUid();
+  }, [groupId]);
 
   const handleOptionClick = (option) => {
     if (selectedOption) return;
 
-    setSelectedOption(option);
     const isCorrect = option === currentQuestion.correctAnswer;
+    setSelectedOption(option);
+    setFeedback(isCorrect ? "correct" : "wrong");
 
     if (isCorrect) {
       setScore((prev) => prev + 10);
-      setFeedback("correct");
-    } else {
-      setFeedback("wrong");
     }
 
     setTimeout(() => {
@@ -63,7 +61,7 @@ export default function Quiz({ groupId = null, onComplete }) {
       if (questionIndex < questions.length - 1) {
         setQuestionIndex((prev) => prev + 1);
       } else {
-        submitFinalScore(); // ✅ Safe call to async wrapper
+        submitFinalScore();
       }
     }, 1000);
   };
@@ -79,16 +77,14 @@ export default function Quiz({ groupId = null, onComplete }) {
     }
 
     if (!groupId) {
-      toast.error("❌ Cannot submit score: Group ID is required.");
+      toast.error("❌ Cannot submit score: Group ID is missing.");
       return;
     }
 
     setSubmitting(true);
     try {
-      // ✅ Ensure user is part of the group (required by Firestore rule)
       await ensureUserInGroup(groupId, user.uid);
 
-      // ✅ Firestore expects `userId` and valid groupId
       await addDoc(collection(db, "scores"), {
         userId: user.uid,
         email: user.email,
@@ -96,14 +92,14 @@ export default function Quiz({ groupId = null, onComplete }) {
         timeTaken: duration,
         timestamp: Date.now(),
         groupId,
+        groupUid: groupUid || groupId, // ✅ fixed
       });
 
       setSubmitted(true);
-      console.log("[Quiz] ✅ Submitted | Score:", score, "| Time:", duration, "s | Group:", groupId);
       toast.success("🎉 Quiz submitted successfully!");
 
       if (onComplete) {
-        onComplete(score, duration, groupId);
+        onComplete(score, duration, groupUid || groupId);
       }
     } catch (err) {
       console.error("❌ Quiz submission failed:", err);
@@ -134,7 +130,6 @@ export default function Quiz({ groupId = null, onComplete }) {
           <div className="grid grid-cols-1 gap-2">
             {currentQuestion.options.map((option) => {
               const isSelected = option === selectedOption;
-              const isCorrect = option === currentQuestion.correctAnswer;
               const userWasCorrect = feedback === "correct" && isSelected;
               const userWasWrong = feedback === "wrong" && isSelected;
 
@@ -180,9 +175,9 @@ export default function Quiz({ groupId = null, onComplete }) {
             You scored <span className="font-bold">{score}</span> out of {questions.length * 10}
           </p>
           <p className="text-sm text-gray-500 mb-2">⏱ Time Taken: {timeTaken} seconds</p>
-          {groupId && (
+          {groupUid && (
             <p className="text-xs text-gray-400 mb-2">
-              Group ID: <code>{groupId}</code>
+              Group UID: <code>{groupUid}</code>
             </p>
           )}
           <button

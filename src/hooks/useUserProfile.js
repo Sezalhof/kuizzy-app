@@ -16,20 +16,14 @@ export function useUserProfile(uid) {
   const lastSnapshotPendingWrites = useRef(null);
   const previousUid = useRef(null);
 
-  // ✅ Compare profile objects
   const profileDataChanged = useCallback((a, b) => {
     return JSON.stringify(a) !== JSON.stringify(b);
   }, []);
 
-  // Helper to check if profile data is considered incomplete
   const isProfileIncomplete = (data) => {
-    if (!data) return true;
-    if (Object.keys(data).length === 0) return true;
-    if (!data.role) return true;
-    return false;
+    return !data || Object.keys(data).length === 0 || !data.role;
   };
 
-  // 🔁 Stable memoized profile
   const profile = useMemo(() => {
     if (!rawProfile || !uid) return null;
 
@@ -60,17 +54,10 @@ export function useUserProfile(uid) {
 
     if (!uid || typeof uid !== "string") {
       console.warn("[useUserProfile] Invalid UID – doing cleanup");
-      clearTimeout(retryTimer.current);
-      unsubscribeRef.current?.();
-      if (mounted) {
-        setRawProfile(null);
-        setLoading(false);
-        setError(null);
-      }
+      cleanup();
       return;
     }
 
-    // ✅ Return cached profile immediately
     const cached = profileCacheByUid.get(uid);
     if (uid === previousUid.current && retryCount === 0 && cached && cached._stable) {
       console.log("[useUserProfile] ✅ Using cached stable profile");
@@ -94,8 +81,6 @@ export function useUserProfile(uid) {
         if (!mounted) return;
 
         const pendingWrites = docSnap.metadata.hasPendingWrites;
-
-        // ✅ Only skip if rawProfile already exists
         if (lastSnapshotPendingWrites.current === pendingWrites && rawProfile !== null) {
           console.log("[useUserProfile] 🔁 Duplicate snapshot – skipping");
           return;
@@ -120,14 +105,11 @@ export function useUserProfile(uid) {
           if (shouldUpdate) {
             console.log("[useUserProfile] 🔄 Profile updated");
             setRawProfile(data);
-
-            const stableProfile = {
+            profileCacheByUid.set(uid, {
               ...data,
               createdAt: data.createdAt ?? null,
               _stable: true,
-            };
-
-            profileCacheByUid.set(uid, stableProfile);
+            });
           } else {
             console.log("[useUserProfile] ✅ Profile unchanged");
           }
@@ -159,10 +141,19 @@ export function useUserProfile(uid) {
 
     unsubscribeRef.current = unsubscribe;
 
-    return () => {
-      mounted = false;
+    function cleanup() {
       unsubscribeRef.current?.();
       clearTimeout(retryTimer.current);
+      if (mounted) {
+        setRawProfile(null);
+        setLoading(false);
+        setError(null);
+      }
+    }
+
+    return () => {
+      mounted = false;
+      cleanup();
       console.log("[useUserProfile] 🔚 Cleanup on unmount or UID change");
     };
   }, [uid, retryCount, profileDataChanged, rawProfile]);

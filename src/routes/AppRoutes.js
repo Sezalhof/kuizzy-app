@@ -1,7 +1,7 @@
-/* eslint-disable react-hooks/exhaustive-deps */
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useCallback } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 
+// Page Components
 import HomePage from "../pages/HomePage";
 import EnrollPage from "../pages/EnrollPage";
 import ProfilePage from "../pages/ProfilePage";
@@ -12,13 +12,36 @@ import GroupsPage from "../pages/GroupsPage";
 import QuizPage from "../pages/QuizPage";
 import LeaderboardPage from "../pages/LeaderboardPage";
 import GroupMembersPage from "../pages/GroupMembersPage";
+import GroupQuizPage from "../pages/GroupQuizPage";
+import GroupLeaderboardPage from "../pages/GroupLeaderboardPage";
+import SeedDataPage from "../pages/admin/SeedDataPage";
 
 
-import GroupQuizPage from "../pages/GroupQuizPage"; // Added for group quiz route
-import GroupLeaderboardPage from "../pages/GroupLeaderboardPage"; // Updated import name
-
+// Auth Components
 import RequireAuth from "../components/auth/RequireAuth";
 import RequireProfile from "../components/auth/RequireProfile";
+
+// Constants
+const ROLES = {
+  STUDENT: "student",
+  ADMIN: "admin",
+  TEACHER: "teacher",
+};
+
+const ROUTES = {
+  HOME: "/",
+  ENROLL: "/enroll",
+  DASHBOARD: "/dashboard",
+  ADMIN: "/admin",
+  PROFILE: "/profile",
+  FRIENDS: "/friends",
+  GROUPS: "/groups",
+  QUIZ: "/quiz",
+  LEADERBOARD: "/leaderboard",
+  GROUP_QUIZ: "/group-quiz/:groupId",
+  GROUP_LEADERBOARD: "/group-leaderboard/:groupId",
+  GROUP_MEMBERS: "/group-members/:groupId",
+};
 
 export default function AppRoutes({
   user,
@@ -36,313 +59,330 @@ export default function AppRoutes({
 }) {
   const location = useLocation();
 
-  const isStudent = useMemo(() => profile?.role === "student", [profile]);
+  // Memoized role checks
+  const userRole = useMemo(() => profile?.role, [profile]);
+  const isStudent = useMemo(() => userRole === ROLES.STUDENT, [userRole]);
   const isAdminOrTeacher = useMemo(
-    () => profile?.role === "admin" || profile?.role === "teacher",
-    [profile]
+    () => userRole === ROLES.ADMIN || userRole === ROLES.TEACHER,
+    [userRole]
   );
 
+  // Memoized enrollment check
   const needsEnrollment = useMemo(() => {
     const result =
       user &&
       !profileLoading &&
       !profile &&
       profileError === "Profile does not exist.";
-    console.log("[AppRoutes] 🎯 needsEnrollment evaluated:", result);
+    
+    if (process.env.NODE_ENV === "development") {
+      console.log("[AppRoutes] 🎯 needsEnrollment evaluated:", result);
+    }
+    
     return result;
   }, [user, profile, profileLoading, profileError]);
 
-  useEffect(() => {
-    console.groupCollapsed("[AppRoutes] ✅ Mounted");
-    console.log("[AppRoutes] Props Snapshot:", {
+  // Memoized common props for pages
+  const commonProps = useMemo(
+    () => ({
       user,
       profile,
       profileLoading,
       profileError,
-      leaderboardData,
-      quizCompleted,
-      score,
-      timeTaken,
-      fullyReady,
-      authLoading,
-      needsEnrollment,
-    });
-    console.groupEnd();
+    }),
+    [user, profile, profileLoading, profileError]
+  );
 
+  // Memoized auth wrapper props
+  const authProps = useMemo(
+    () => ({
+      user,
+      authLoading,
+    }),
+    [user, authLoading]
+  );
+
+  // Memoized profile wrapper props
+  const profileProps = useMemo(
+    () => ({
+      user,
+      profile,
+      profileLoading,
+      profileError,
+    }),
+    [user, profile, profileLoading, profileError]
+  );
+
+  // Development logging
+  const logMountInfo = useCallback(() => {
+    if (process.env.NODE_ENV === "development") {
+      console.groupCollapsed("[AppRoutes] ✅ Mounted");
+      console.log("[AppRoutes] Props Snapshot:", {
+        user: !!user,
+        profile: !!profile,
+        profileLoading,
+        profileError,
+        leaderboardData: !!leaderboardData,
+        quizCompleted,
+        score,
+        timeTaken,
+        fullyReady,
+        authLoading,
+        needsEnrollment,
+        userRole,
+      });
+      console.groupEnd();
+    }
+  }, [
+    user,
+    profile,
+    profileLoading,
+    profileError,
+    leaderboardData,
+    quizCompleted,
+    score,
+    timeTaken,
+    fullyReady,
+    authLoading,
+    needsEnrollment,
+    userRole,
+  ]);
+
+  // Mount/unmount effects
+  useEffect(() => {
+    logMountInfo();
+    
     if (typeof onMounted === "function") {
-      console.log("[AppRoutes] Calling onMounted callback");
+      if (process.env.NODE_ENV === "development") {
+        console.log("[AppRoutes] Calling onMounted callback");
+      }
       onMounted();
     }
 
     return () => {
-      console.log("[AppRoutes] 🔁 Unmounted");
+      if (process.env.NODE_ENV === "development") {
+        console.log("[AppRoutes] 🔁 Unmounted");
+      }
     };
-  }, [onMounted, needsEnrollment]);
+  }, [onMounted, logMountInfo]);
 
-  // Redirect to /enroll if profile is missing
-  if (needsEnrollment) {
-    if (location.pathname !== "/enroll") {
-      console.warn("[AppRoutes] 🔁 Redirecting to /enroll due to missing profile");
-      return <Navigate to="/enroll" replace />;
+  // Helper components
+  const ProtectedRoute = ({ children }) => (
+    <RequireAuth {...authProps}>
+      <RequireProfile {...profileProps}>
+        {children}
+      </RequireProfile>
+    </RequireAuth>
+  );
+
+  const AuthOnlyRoute = ({ children }) => (
+    <RequireAuth {...authProps}>
+      {children}
+    </RequireAuth>
+  );
+
+  // Dashboard router logic
+  const DashboardRouter = () => {
+    if (process.env.NODE_ENV === "development") {
+      console.group("[AppRoutes] 🧭 Rendering /dashboard");
+      console.log("User:", !!user);
+      console.log("Profile:", !!profile);
+      console.log("Loading:", profileLoading);
+      console.log("Error:", profileError);
+      console.log("isStudent:", isStudent);
+      console.groupEnd();
     }
-    console.info("[AppRoutes] 🚧 User needs enrollment. Showing EnrollPage only.");
+
+    if (isStudent) {
+      return <StudentDashboard {...commonProps} />;
+    }
+    
+    if (isAdminOrTeacher) {
+      return <Navigate to={ROUTES.ADMIN} replace />;
+    }
+    
+    return <Navigate to={ROUTES.HOME} replace />;
+  };
+
+  // Early returns for special states
+  if (needsEnrollment) {
+    if (location.pathname !== ROUTES.ENROLL) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[AppRoutes] 🔁 Redirecting to /enroll due to missing profile");
+      }
+      return <Navigate to={ROUTES.ENROLL} replace />;
+    }
+    
+    if (process.env.NODE_ENV === "development") {
+      console.info("[AppRoutes] 🚧 User needs enrollment. Showing EnrollPage only.");
+    }
+    
     return (
       <Routes>
         <Route
-          path="/enroll"
+          path={ROUTES.ENROLL}
           element={
-            <RequireAuth user={user} authLoading={authLoading}>
+            <AuthOnlyRoute>
               <EnrollPage />
-            </RequireAuth>
+            </AuthOnlyRoute>
           }
         />
-        <Route path="*" element={<Navigate to="/enroll" replace />} />
+        <Route path="*" element={<Navigate to={ROUTES.ENROLL} replace />} />
       </Routes>
     );
   }
 
-  // Wait if app is not fully ready
   if (!fullyReady) {
-    console.log("[AppRoutes] ⏳ Waiting for fullyReady...");
-    console.log("[AppRoutes] fullyReady is", fullyReady);
+    if (process.env.NODE_ENV === "development") {
+      console.log("[AppRoutes] ⏳ Waiting for fullyReady...");
+      console.log("[AppRoutes] fullyReady is", fullyReady);
+    }
     return null;
   }
 
+  // Main routes
   return (
     <Routes>
-      <Route path="/" element={<HomePage />} />
-
+      {/* Public Routes */}
+      <Route path={ROUTES.HOME} element={<HomePage />} />
+      
+      {/* Auth-only Routes */}
       <Route
-        path="/enroll"
+        path={ROUTES.ENROLL}
         element={
-          <RequireAuth user={user} authLoading={authLoading}>
+          <AuthOnlyRoute>
             <EnrollPage />
-          </RequireAuth>
+          </AuthOnlyRoute>
         }
       />
 
+      {/* Protected Routes */}
       <Route
-        path="/dashboard"
+        path={ROUTES.DASHBOARD}
         element={
-          <RequireAuth user={user} authLoading={authLoading}>
-            <RequireProfile
-              user={user}
-              profile={profile}
-              profileLoading={profileLoading}
-              profileError={profileError}
-            >
-              {(() => {
-                console.group("[AppRoutes] 🧭 Rendering /dashboard");
-                console.log("User:", user);
-                console.log("Profile:", profile);
-                console.log("Loading:", profileLoading);
-                console.log("Error:", profileError);
-                console.log("isStudent:", isStudent);
-                console.groupEnd();
-
-                if (isStudent) {
-                  return (
-                    <StudentDashboard
-                      user={user}
-                      profile={profile}
-                      profileLoading={profileLoading}
-                      profileError={profileError}
-                    />
-                  );
-                } else if (isAdminOrTeacher) {
-                  return <Navigate to="/admin" replace />;
-                } else {
-                  return <Navigate to="/" replace />;
-                }
-              })()}
-            </RequireProfile>
-          </RequireAuth>
+          <ProtectedRoute>
+            <DashboardRouter />
+          </ProtectedRoute>
         }
       />
 
-      <Route
-        path="/admin"
-        element={
-          <RequireAuth user={user} authLoading={authLoading}>
-            <RequireProfile
-              user={user}
-              profile={profile}
-              profileLoading={profileLoading}
-              profileError={profileError}
-            >
-              {isAdminOrTeacher ? (
-                <AdminDashboard
-                  user={user}
-                  profile={profile}
-                  profileLoading={profileLoading}
-                  profileError={profileError}
-                />
-              ) : (
-                <Navigate to="/dashboard" replace />
-              )}
-            </RequireProfile>
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/profile"
-        element={
-          <RequireAuth user={user} authLoading={authLoading}>
-            <RequireProfile
-              user={user}
-              profile={profile}
-              profileLoading={profileLoading}
-              profileError={profileError}
-            >
-              <ProfilePage
-                user={user}
-                profile={profile}
-                profileLoading={profileLoading}
-                profileError={profileError}
-              />
-            </RequireProfile>
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/friends"
-        element={
-          <RequireAuth user={user} authLoading={authLoading}>
-            <RequireProfile
-              user={user}
-              profile={profile}
-              profileLoading={profileLoading}
-              profileError={profileError}
-            >
-              <FriendsPage
-                user={user}
-                profile={profile}
-                profileLoading={profileLoading}
-                profileError={profileError}
-              />
-            </RequireProfile>
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/groups"
-        element={
-          <RequireAuth user={user} authLoading={authLoading}>
-            <RequireProfile
-              user={user}
-              profile={profile}
-              profileLoading={profileLoading}
-              profileError={profileError}
-            >
-              <GroupsPage
-                user={user}
-                profile={profile}
-                profileLoading={profileLoading}
-                profileError={profileError}
-              />
-            </RequireProfile>
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/quiz"
-        element={
-          <RequireAuth user={user} authLoading={authLoading}>
-            <RequireProfile
-              user={user}
-              profile={profile}
-              profileLoading={profileLoading}
-              profileError={profileError}
-            >
-              <QuizPage
-                user={user}
-                profile={profile}
-                onComplete={handleQuizComplete}
-                quizCompleted={quizCompleted}
-              />
-            </RequireProfile>
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/leaderboard"
-        element={
-          <RequireAuth user={user} authLoading={authLoading}>
-            <RequireProfile
-              user={user}
-              profile={profile}
-              profileLoading={profileLoading}
-              profileError={profileError}
-            >
-              <LeaderboardPage
-                user={user}
-                profile={profile}
-                leaderboardData={leaderboardData}
-                score={score}
-                timeTaken={timeTaken}
-              />
-            </RequireProfile>
-          </RequireAuth>
-        }
-      />
-
-      {/* Added routes for Group Quiz and Group Leaderboard */}
-      <Route
-        path="/group-quiz/:groupId"
-        element={
-          <RequireAuth user={user} authLoading={authLoading}>
-            <RequireProfile
-              user={user}
-              profile={profile}
-              profileLoading={profileLoading}
-              profileError={profileError}
-            >
-              <GroupQuizPage
-                user={user}
-                profile={profile}
-                profileLoading={profileLoading}
-              />
-            </RequireProfile>
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/group-leaderboard/:groupId"
-        element={
-          <RequireAuth user={user} authLoading={authLoading}>
-            <RequireProfile
-              user={user}
-              profile={profile}
-              profileLoading={profileLoading}
-              profileError={profileError}
-            >
-              <GroupLeaderboardPage
-                user={user}
-                profile={profile}
-                profileLoading={profileLoading}
-              />
-            </RequireProfile>
-          </RequireAuth>
-        }
-      />
-{/* ✅ Group Members Page route added at bottom */}
 <Route
-  path="/group-members/:groupId"
+  path={ROUTES.ADMIN}
   element={
-    <RequireAuth user={user} authLoading={authLoading}>
-      <GroupMembersPage />
-    </RequireAuth>
+    <ProtectedRoute>
+      {isAdminOrTeacher ? (
+        <AdminDashboard {...commonProps} />
+      ) : (
+        <Navigate to={ROUTES.DASHBOARD} replace />
+      )}
+    </ProtectedRoute>
+  }
+>
+  <Route
+    path="seed"
+    element={
+      <ProtectedRoute>
+        <SeedDataPage />
+      </ProtectedRoute>
+    }
+  />
+</Route>
+
+
+      <Route
+        path={ROUTES.PROFILE}
+        element={
+          <ProtectedRoute>
+            <ProfilePage {...commonProps} />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path={ROUTES.FRIENDS}
+        element={
+          <ProtectedRoute>
+            <FriendsPage {...commonProps} />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path={ROUTES.GROUPS}
+        element={
+          <ProtectedRoute>
+            <GroupsPage {...commonProps} />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path={ROUTES.QUIZ}
+        element={
+          <ProtectedRoute>
+            <QuizPage
+              {...commonProps}
+              onComplete={handleQuizComplete}
+              quizCompleted={quizCompleted}
+            />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path={ROUTES.LEADERBOARD}
+        element={
+          <ProtectedRoute>
+            <LeaderboardPage
+              {...commonProps}
+              leaderboardData={leaderboardData}
+              score={score}
+              timeTaken={timeTaken}
+            />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Group Routes */}
+      <Route
+        path={ROUTES.GROUP_QUIZ}
+        element={
+          <ProtectedRoute>
+            <GroupQuizPage {...commonProps} />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path={ROUTES.GROUP_LEADERBOARD}
+        element={
+          <ProtectedRoute>
+            <GroupLeaderboardPage {...commonProps} />
+          </ProtectedRoute>
+        }
+      />
+
+
+      <Route
+        path={ROUTES.GROUP_MEMBERS}
+        element={
+          <AuthOnlyRoute>
+            <GroupMembersPage />
+          </AuthOnlyRoute>
+        }
+      />
+<Route
+  path="/admin/seed"
+  element={
+    <ProtectedRoute>
+      <SeedDataPage />
+    </ProtectedRoute>
   }
 />
 
 
-      <Route path="*" element={<Navigate to="/" replace />} />
+      {/* Fallback Route */}
+      <Route path="*" element={<Navigate to={ROUTES.HOME} replace />} />
     </Routes>
   );
 }
