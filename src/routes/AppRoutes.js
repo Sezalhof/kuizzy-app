@@ -15,6 +15,8 @@ import GroupMembersPage from "../pages/GroupMembersPage";
 import GroupQuizPage from "../pages/GroupQuizPage";
 import GroupLeaderboardPage from "../pages/GroupLeaderboardPage";
 import SeedDataPage from "../pages/admin/SeedDataPage";
+import ApiTestPage from '../pages/ApiTestPage';
+
 
 
 // Auth Components
@@ -379,6 +381,9 @@ export default function AppRoutes({
     </ProtectedRoute>
   }
 />
+
+<Route path="/api-test" element={<ApiTestPage />} />
+
 
 
       {/* Fallback Route */}
