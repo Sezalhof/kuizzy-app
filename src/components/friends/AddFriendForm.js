@@ -1,5 +1,3 @@
-// src/components/friends/AddFriendForm.js
-
 import React, { useState, useEffect } from "react";
 import {
   collection,
@@ -43,33 +41,27 @@ export default function AddFriendForm() {
 
   const ensureCountryCode = (input) => {
     const cleaned = normalizePhone(input);
-  
-    // Handle Bangladeshi local number starting with 01 (like 017xxxxxxx)
+
     if (/^01\d{8}$/.test(cleaned)) {
-      return "+880" + cleaned.slice(1); // ➜ +88017xxxxxxx
+      return "+880" + cleaned.slice(1);
     }
-  
-    // Handle number starting with 8801 (but missing '+')
+
     if (/^8801\d{8}$/.test(cleaned)) {
-      return "+" + cleaned; // ➜ +88017xxxxxxx
+      return "+" + cleaned;
     }
-  
-    // Already in correct +8801xxxxxxxx format
+
     if (/^\+8801\d{8}$/.test(cleaned)) {
       return cleaned;
     }
-  
-    // Fallback: input doesn't match known patterns
+
     if (!cleaned.startsWith("+")) {
       setCountryCodeHint(
         `📌 Did you mean one of these country codes? ${COUNTRY_CODE_SUGGESTIONS.join(", ")}`
       );
     }
-  
+
     return cleaned;
   };
-  
-  
 
   const handleSearch = async () => {
     setLoading(true);
@@ -213,15 +205,33 @@ export default function AddFriendForm() {
 
       {searchResult && (
         <div className="border rounded p-3 flex items-center justify-between">
-          <div>
-            <p className="font-medium">{searchResult.name || "Unnamed User"}</p>
-            <p className="text-sm text-gray-500">
-              {searchResult.email || "No email"}
-            </p>
-            <p className="text-sm text-gray-500">
-              {searchResult.phone || "No phone"}
-            </p>
+          <div className="flex items-center gap-3">
+            {searchResult.photoURL ? (
+              <img
+                src={searchResult.photoURL}
+                alt="Profile"
+                className="w-10 h-10 rounded-full object-cover"
+                onError={(e) => {
+                  e.target.onerror = null;
+                  e.target.src = "/fallback-logo.png"; // fallback image path
+                }}
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 text-sm">
+                ?
+              </div>
+            )}
+            <div>
+              <p className="font-medium">{searchResult.name || "Unnamed User"}</p>
+              <p className="text-sm text-gray-600">
+                {searchResult.grade ? `Grade: ${searchResult.grade}` : "Grade: N/A"}
+              </p>
+              <p className="text-sm text-gray-600">
+                {searchResult.school ? `School: ${searchResult.school}` : "School: N/A"}
+              </p>
+            </div>
           </div>
+
           <Button onClick={handleSendRequest}>➕ Invite to Join</Button>
         </div>
       )}

@@ -10,6 +10,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../../firebase";
 import { useUserProfile } from "../../hooks/useUserProfile"; // ✅ named import
+import fallbackLogo from "../../assets/fallback-logo.png"; // adjust path as needed
 
 export default function InviteFriendsModal({ group, onClose }) {
   const { user } = useUserProfile();
@@ -61,7 +62,7 @@ export default function InviteFriendsModal({ group, onClose }) {
               return {
                 uid,
                 name: data.name || "Unknown",
-                email: data.email || uid,
+                photoURL: data.photoURL || null,
                 className: data.className || "N/A",
                 schoolName: data.schoolName || "N/A",
               };
@@ -117,11 +118,26 @@ export default function InviteFriendsModal({ group, onClose }) {
                 key={friend.uid}
                 className="flex justify-between items-center border rounded p-2 hover:bg-gray-50"
               >
-                <div>
-                  <p className="font-medium">{friend.name}</p>
-                  <p className="text-xs text-gray-500">
-                    {friend.className} • {friend.schoolName}
-                  </p>
+                <div className="flex items-center gap-3">
+                  {friend.photoURL ? (
+                    <img
+                      src={friend.photoURL}
+                      alt={`${friend.name} profile`}
+                      className="w-10 h-10 rounded-full object-cover"
+                      onError={(e) => {
+                        e.target.onerror = null;
+                        e.target.src = fallbackLogo;
+                      }}
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 text-xs">
+                      ?
+                    </div>
+                  )}
+                  <div>
+                    <p className="font-medium">{friend.name}</p>
+                    <p className="text-xs text-gray-500">{friend.className}</p>
+                  </div>
                 </div>
                 <button
                   onClick={() => handleInvite(friend.uid)}

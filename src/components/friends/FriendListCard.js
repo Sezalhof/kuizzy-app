@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { doc, deleteDoc, getDoc } from "firebase/firestore";
+import { doc, getDoc, deleteDoc } from "firebase/firestore";
 import { db } from "../../firebase";
 import useAuth from "../../hooks/useAuth";
 import { toast } from "react-toastify";
@@ -11,14 +11,20 @@ export default function FriendListCard({ user }) {
     email: user.email || "",
     phone: user.phone || "",
     uid: user.uid,
-    school: "",
-    class: "",
+    avatar: user.avatar || "/default-avatar.png",
+    school: user.school || "",
+    grade: user.grade || "",  // Changed from class to grade for consistency
   });
-
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!user?.uid) return;
+
+    // Fetch only if missing avatar or school or grade
+    if (user.avatar && user.school && user.grade) {
+      setUserInfo(user);
+      return;
+    }
 
     const fetchDetails = async () => {
       try {
@@ -30,8 +36,9 @@ export default function FriendListCard({ user }) {
             name: data.name || prev.name,
             email: data.email || prev.email,
             phone: data.phone || prev.phone,
-            school: data.school || "",
-            class: data.class || "",
+            avatar: data.avatar || prev.avatar,
+            school: data.school || prev.school,
+            grade: data.grade || prev.grade,
           }));
         }
       } catch (err) {
@@ -40,7 +47,7 @@ export default function FriendListCard({ user }) {
     };
 
     fetchDetails();
-  }, [user.uid]);
+  }, [user]);
 
   const handleUnfriend = async () => {
     setLoading(true);
@@ -48,7 +55,7 @@ export default function FriendListCard({ user }) {
       const ref1 = doc(db, "friend_requests", `${currentUser.uid}_${user.uid}`);
       const ref2 = doc(db, "friend_requests", `${user.uid}_${currentUser.uid}`);
       await Promise.allSettled([deleteDoc(ref1), deleteDoc(ref2)]);
-      toast.info("❌ Sorry! You unfriended this user.");
+      toast.info("❌ You unfriended this user.");
     } catch (error) {
       toast.error("❌ Failed to unfriend.");
     } finally {
@@ -57,37 +64,39 @@ export default function FriendListCard({ user }) {
   };
 
   return (
-    <div className="border p-4 rounded shadow-sm bg-white flex flex-col md:flex-row md:justify-between md:items-center">
-      <div>
-        <p className="font-semibold text-gray-800">{userInfo.name}</p>
-        <p className="text-sm text-gray-500">{userInfo.email}</p>
-        <p className="text-xs text-gray-400">{userInfo.phone}</p>
-        <div className="mt-1 flex flex-wrap gap-2 text-xs text-gray-600">
-          {userInfo.school && (
-            <span className="bg-gray-100 px-2 py-0.5 rounded">
-              🏫 {userInfo.school}
-            </span>
-          )}
-          {userInfo.class && (
-            <span className="bg-gray-100 px-2 py-0.5 rounded">
-              📘 Class {userInfo.class}
-            </span>
-          )}
-          <span className="bg-green-100 px-2 py-0.5 rounded"> 👤 Guest </span>
+    <div className="flex items-center justify-between bg-white rounded shadow-sm p-3 hover:shadow-md transition-shadow duration-200">
+      <div className="flex items-center space-x-3 min-w-0">
+        <img
+          src={userInfo.avatar || "/default-avatar.png"}
+          alt={`${userInfo.name}'s avatar`}
+          className="w-12 h-12 rounded-full object-cover flex-shrink-0"
+          loading="lazy"
+          onError={(e) => { e.target.onerror = null; e.target.src = "/default-avatar.png"; }}
+        />
+        <div className="truncate min-w-0">
+          <p className="text-gray-900 font-semibold truncate">{userInfo.name || "Unknown User"}</p>
+          <p className="text-xs text-gray-500 truncate">{userInfo.email || userInfo.uid}</p>
+          <div className="flex flex-wrap gap-1 mt-1 text-xs text-gray-600">
+            {userInfo.school && (
+              <span className="bg-gray-100 px-2 py-0.5 rounded select-none truncate max-w-full">
+                🏫 {userInfo.school}
+              </span>
+            )}
+            {userInfo.grade && (
+              <span className="bg-gray-100 px-2 py-0.5 rounded select-none truncate max-w-full">
+                📘 Grade {userInfo.grade}
+              </span>
+            )}
+          </div>
         </div>
       </div>
-
-      <div className="mt-2 md:mt-0">
-        <button
-          onClick={handleUnfriend}
-          disabled={loading}
-          className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded"
-        >
-          {loading ? "Removing..." : "❌ Sorry!"}
-        </button>
-      </div>
+      <button
+        onClick={handleUnfriend}
+        disabled={loading}
+        className="ml-4 px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded whitespace-nowrap"
+      >
+        {loading ? "Removing..." : "❌ Unfriend"}
+      </button>
     </div>
   );
 }
-
-

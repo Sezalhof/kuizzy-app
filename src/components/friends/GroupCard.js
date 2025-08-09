@@ -1,5 +1,3 @@
-// ✅ FIXED: src/components/friends/GroupCard.js
-
 import React, { useState, useEffect } from "react";
 import { doc, updateDoc, arrayRemove, getDoc } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
@@ -17,7 +15,7 @@ export default function GroupCard({ group, currentUserId, onLeft }) {
 
   const isOwner = group.ownerId === currentUserId;
 
-  // Fallback if membersDetailed is not provided
+  // Fetch member details if not already loaded
   useEffect(() => {
     const fetchMembers = async () => {
       if (group.memberIds?.length && (!group.membersDetailed || group.membersDetailed.length === 0)) {
@@ -29,15 +27,17 @@ export default function GroupCard({ group, currentUserId, onLeft }) {
               return {
                 uid,
                 displayName: data.name || "Unknown",
-                className: data.grade || "N/A",
-                schoolName: data.school || "N/A",
+                grade: data.grade || "",
+                school: data.school || "",
+                photoURL: data.photoURL || "", // profile pic URL if any
               };
             } catch {
               return {
                 uid,
                 displayName: "Unknown",
-                className: "N/A",
-                schoolName: "N/A",
+                grade: "",
+                school: "",
+                photoURL: "",
               };
             }
           })
@@ -138,13 +138,30 @@ export default function GroupCard({ group, currentUserId, onLeft }) {
       </div>
 
       {showMembers && (
-        <div className="mt-2 border rounded p-2 bg-gray-50">
-          <h4 className="font-semibold mb-1 text-sm">Group Members</h4>
-          <ul className="text-sm space-y-1">
+        <div className="mt-2 border rounded p-2 bg-gray-50 max-h-64 overflow-y-auto">
+          <h4 className="font-semibold mb-2 text-sm">Group Members</h4>
+          <ul className="space-y-2">
             {membersDetailed.length > 0 ? (
               membersDetailed.map((member) => (
-                <li key={member.uid}>
-                  {member.displayName} – {member.className} – {member.schoolName}
+                <li
+                  key={member.uid}
+                  className="flex items-center gap-3 bg-white p-2 rounded shadow-sm"
+                >
+                  <img
+                    src={member.photoURL || fallbackLogo}
+                    alt={member.displayName}
+                    className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.src = fallbackLogo;
+                    }}
+                  />
+                  <div className="flex flex-col">
+                    <span className="font-medium text-gray-900">{member.displayName}</span>
+                    <span className="text-xs text-gray-600">
+                      {member.grade} {member.school && <>| {member.school}</>}
+                    </span>
+                  </div>
                 </li>
               ))
             ) : (

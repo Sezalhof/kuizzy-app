@@ -1,10 +1,9 @@
-// ✅ FILE: src/components/group/GroupCreator.js
-
 import React, { useState, useEffect } from "react";
 import {
   collection,
   doc,
   getDocs,
+  getDoc,
   query,
   setDoc,
   where,
@@ -45,12 +44,10 @@ export default function GroupCreator({ onClose }) {
 
         const loaded = [];
         for (const friendId of friendIds) {
-          const userQuery = query(
-            collection(db, "users"),
-            where("__name__", "==", friendId)
-          );
-          const userSnap = await getDocs(userQuery);
-          userSnap.forEach((d) => loaded.push({ uid: d.id, ...d.data() }));
+          const snap = await getDoc(doc(db, "users", friendId));
+          if (snap.exists()) {
+            loaded.push({ uid: friendId, ...snap.data() });
+          }
         }
         setFriends(loaded);
       } catch (err) {
@@ -82,7 +79,7 @@ export default function GroupCreator({ onClose }) {
       return;
     }
 
-    const groupUid = crypto.randomUUID(); // ✅ Fully random, no UID involved
+    const groupUid = crypto.randomUUID();
 
     try {
       await setDoc(doc(db, "groups", groupUid), {

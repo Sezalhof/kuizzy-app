@@ -1,5 +1,3 @@
-// ✅ FILE: src/pages/GroupsPage.js
-
 import React, { useEffect, useState } from "react";
 import {
   collection,
@@ -47,6 +45,7 @@ export default function GroupsPage() {
             const groupData = docSnap.data();
             const memberIds = groupData.memberIds || [];
 
+            // Fetch detailed info for members (avatar, name, grade, school)
             const membersDetailed = await Promise.all(
               memberIds.map(async (uid) => {
                 try {
@@ -55,11 +54,17 @@ export default function GroupsPage() {
                   return {
                     uid,
                     displayName: userData.name || "Unknown",
+                    photoURL: userData.photoURL || userData.avatar || "/fallback-logo.png",
+                    grade: userData.grade || null,
+                    school: userData.school || null,
                   };
                 } catch {
                   return {
                     uid,
                     displayName: "Unknown",
+                    photoURL: "/fallback-logo.png",
+                    grade: null,
+                    school: null,
                   };
                 }
               })
@@ -199,6 +204,31 @@ export default function GroupsPage() {
                   Members: {team.membersDetailed.length}
                 </p>
 
+                {/* Show member avatars & names horizontally */}
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {team.membersDetailed.map((member) => (
+                    <div
+                      key={member.uid}
+                      className="flex items-center gap-2 bg-gray-50 rounded px-2 py-1"
+                      title={`${member.displayName}\nClass: ${
+                        member.grade || "N/A"
+                      }\nSchool: ${member.school || "N/A"}`}
+                    >
+                      <img
+                        src={member.photoURL || "/fallback-logo.png"}
+                        alt={`${member.displayName} avatar`}
+                        className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                        loading="lazy"
+                        onError={(e) => {
+                          e.target.onerror = null;
+                          e.target.src = "/fallback-logo.png";
+                        }}
+                      />
+                      <span className="text-xs font-medium">{member.displayName}</span>
+                    </div>
+                  ))}
+                </div>
+
                 <div className="flex flex-wrap gap-2 mt-2">
                   <Link
                     to={`/group-quiz/${groupUid}`}
@@ -261,11 +291,24 @@ export default function GroupsPage() {
             {acceptedFriends.map((friend) => (
               <li
                 key={friend.uid}
-                className="border rounded p-3 shadow-sm bg-white"
+                className="border rounded p-3 shadow-sm bg-white flex items-center gap-3"
               >
-                <p className="font-semibold">
-                  {friend.name || "Unnamed Guest"}
-                </p>
+                <img
+                  src={friend.photoURL || friend.avatar || "/fallback-logo.png"}
+                  alt={`${friend.name || "Unnamed Guest"} avatar`}
+                  className="w-12 h-12 rounded-full object-cover flex-shrink-0"
+                  loading="lazy"
+                  onError={(e) => {
+                    e.target.onerror = null;
+                    e.target.src = "/fallback-logo.png";
+                  }}
+                />
+                <div>
+                  <p className="font-semibold">{friend.name || "Unnamed Guest"}</p>
+                  <p className="text-xs text-gray-600">
+                    Class: {friend.grade || "N/A"} | School: {friend.school || "N/A"}
+                  </p>
+                </div>
               </li>
             ))}
           </ul>

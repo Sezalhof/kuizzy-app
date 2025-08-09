@@ -1,11 +1,39 @@
-import React, { useState } from "react";
-import { doc, deleteDoc } from "firebase/firestore";
+import React, { useState, useEffect } from "react";
+import { doc, getDoc, deleteDoc } from "firebase/firestore";
 import { db } from "../../firebase";
 import { toast } from "react-toastify";
 
-export default function FriendSentCard({ request }) {
-  const { name, email, phone, id } = request || {};
+export default function FriendSentCard({ user }) {
+  const { name, grade, school, uid, id } = user || {};
   const [loading, setLoading] = useState(false);
+  const [userInfo, setUserInfo] = useState({
+    name: name || "",
+    grade: grade || "",
+    school: school || "",
+    avatar: "/default-avatar.png",
+  });
+
+  useEffect(() => {
+    const fetchUserInfo = async () => {
+      if (!uid) return;
+      try {
+        const snap = await getDoc(doc(db, "users", uid));
+        if (snap.exists()) {
+          const data = snap.data();
+          setUserInfo({
+            name: data.name || "Unknown",
+            grade: data.grade || "",
+            school: data.school || "",
+            avatar: data.avatar || "/default-avatar.png",
+          });
+        }
+      } catch (err) {
+        console.error("[FriendSentCard] Error fetching user info:", err);
+      }
+    };
+
+    fetchUserInfo();
+  }, [uid]);
 
   const handleCancel = async () => {
     if (!id) {
@@ -25,18 +53,27 @@ export default function FriendSentCard({ request }) {
   };
 
   return (
-    <div className="border p-4 rounded shadow-sm bg-white flex flex-col md:flex-row md:justify-between md:items-center">
-      <div>
-        <p className="font-semibold text-gray-800">{name || "Unknown"}</p>
-        <p className="text-sm text-gray-500">{email}</p>
-        <p className="text-xs text-gray-400">{phone}</p>
+    <div className="flex items-center justify-between bg-white rounded shadow-sm p-3 hover:shadow-md transition-shadow duration-200">
+      <div className="flex items-center space-x-3 min-w-0">
+        <img
+          src={userInfo.avatar}
+          alt={`${userInfo.name}'s avatar`}
+          className="w-12 h-12 rounded-full object-cover flex-shrink-0"
+          loading="lazy"
+          onError={(e) => { e.target.onerror = null; e.target.src = "/default-avatar.png"; }}
+        />
+        <div className="truncate min-w-0">
+          <p className="text-gray-900 font-semibold truncate">{userInfo.name}</p>
+          <p className="text-xs text-gray-500 truncate">📘 Grade {userInfo.grade}</p>
+          <p className="text-xs text-gray-400 truncate">🏫 {userInfo.school}</p>
+        </div>
       </div>
 
       <div className="mt-2 md:mt-0">
         <button
           onClick={handleCancel}
           disabled={loading}
-          className="px-3 py-1 text-sm bg-yellow-100 hover:bg-yellow-200 rounded"
+          className="px-3 py-1 text-sm bg-yellow-100 hover:bg-yellow-200 rounded whitespace-nowrap"
         >
           {loading ? "Cancelling..." : "⏪ Cancel Invite"}
         </button>

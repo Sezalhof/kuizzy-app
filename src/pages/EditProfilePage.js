@@ -1,117 +1,324 @@
-import React, { useEffect, useState } from 'react';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../firebase';
-import { useNavigate } from 'react-router-dom';
-import useAuth from '../hooks/useAuth';
-import { useUserProfile } from '../hooks/useUserProfile';
+// src/pages/EditProfilePage.js
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import useAuth from "../hooks/useAuth";
+import { useUserProfile } from "../hooks/useUserProfile";
+import {
+  updateUserProfile,
+  getAllSchoolsGrouped,
+  getClassOptions,
+  getGenderOptions,
+  getReligionOptions,
+} from "../utils/firestoreUtils";
 
-export default function EditProfilePage() {
-  const navigate = useNavigate();
+const EditProfilePage = () => {
   const { user } = useAuth();
-  const { profile, loading: profileLoading } = useUserProfile(user?.uid);
-  console.log("📄 [EnrollPage] UID:", user?.uid);
-  console.log("🧬 [EnrollPage] Profile:", profile);
-  console.log("⏳ [EnrollPage] Profile Loading:", profileLoading);
+  const { profile, loading } = useUserProfile(user?.uid ?? null);
+  const navigate = useNavigate();
 
+  // Initial form state keys aligned to profile structure
   const [formData, setFormData] = useState({
-    name: '',
-    upazila: '',
-    institution: '',
-    grade: ''
+    fullName: "",
+    phone: "",
+    gender: "",
+    religion: "",
+    schoolDivision: "",
+    schoolDistrict: "",
+    schoolUpazila: "",
+    schoolUnion: "",
+    schoolName: "",
+    class: "",
   });
-  const [loading, setLoading] = useState(true);
 
+  // Schools data nested: division → district → upazila → union → schools[]
+  const [schoolOptions, setSchoolOptions] = useState({});
+
+  const classOptions = getClassOptions();
+  const genderOptions = getGenderOptions();
+  const religionOptions = getReligionOptions();
+
+  // Load all schools grouped nested by division → district → upazila → union → schools array
   useEffect(() => {
-    const fetchProfile = async () => {
-      if (!user || profileLoading || !profile) return;
-      setFormData({
-        name: profile.name || '',
-        upazila: profile.upazila || '',
-        institution: profile.institution || '',
-        grade: profile.grade || ''
-      });
-      setLoading(false);
+    const fetchSchools = async () => {
+      try {
+        const schools = await getAllSchoolsGrouped();
+        setSchoolOptions(schools || {});
+      } catch (err) {
+        console.error("Failed to fetch schools:", err);
+        setSchoolOptions({});
+      }
     };
-    fetchProfile();
-  }, [user, profile, profileLoading]);
+    fetchSchools();
+  }, []);
 
+  // Prefill form with profile data when loaded
+  useEffect(() => {
+    if (profile) {
+      setFormData({
+        fullName: profile.fullName || "",
+        phone: profile.phone || "",
+        gender: profile.gender || "",
+        religion: profile.religion || "",
+        schoolDivision: profile.schoolDivision || "",
+        schoolDistrict: profile.schoolDistrict || "",
+        schoolUpazila: profile.schoolUpazila || "",
+        schoolUnion: profile.schoolUnion || "",
+        schoolName: profile.schoolName || "",
+        class: profile.class || "",
+      });
+    }
+  }, [profile]);
+
+  // Filtered dropdown options based on current selections
+  const filteredDistricts = formData.schoolDivision
+    ? Object.keys(schoolOptions[formData.schoolDivision] || {})
+    : [];
+
+  const filteredUpazilas = formData.schoolDivision && formData.schoolDistrict
+    ? Object.keys(
+        schoolOptions[formData.schoolDivision]?.[formData.schoolDistrict] || {}
+      )
+    : [];
+
+  const filteredUnions = formData.schoolDivision &&
+    formData.schoolDistrict &&
+    formData.schoolUpazila
+    ? Object.keys(
+        schoolOptions[formData.schoolDivision]?.[formData.schoolDistrict]?.[
+          formData.schoolUpazila
+        ] || {}
+      )
+    : [];
+
+  const filteredSchools = formData.schoolDivision &&
+    formData.schoolDistrict &&
+    formData.schoolUpazila &&
+    formData.schoolUnion
+    ? schoolOptions[formData.schoolDivision]?.[formData.schoolDistrict]?.[
+        formData.schoolUpazila
+      ]?.[formData.schoolUnion] || []
+    : [];
+
+  // Handle cascading resets on parent select change
   const handleChange = (e) => {
-    setFormData(prev => ({
+    const { name, value } = e.target;
+    setFormData((prev) => ({
       ...prev,
-      [e.target.name]: e.target.value
+      [name]: value,
+      ...(name === "schoolDivision" && {
+        schoolDistrict: "",
+        schoolUpazila: "",
+        schoolUnion: "",
+        schoolName: "",
+      }),
+      ...(name === "schoolDistrict" && {
+        schoolUpazila: "",
+        schoolUnion: "",
+        schoolName: "",
+      }),
+      ...(name === "schoolUpazila" && {
+        schoolUnion: "",
+        schoolName: "",
+      }),
+      ...(name === "schoolUnion" && {
+        schoolName: "",
+      }),
     }));
   };
 
+  // Submit updated profile data
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!user) return;
-    const friendGroup = formData.grade.toLowerCase().replace(/\s+/g, '');
-    await setDoc(doc(db, 'users', user.uid), {
-      ...formData,
-      email: user.email,
-      uid: user.uid,
-      friendGroup,
-      updatedAt: new Date()
-    });
-    navigate('/profile');
+    if (!user?.uid) return;
+
+    // Validation for all required fields
+    if (
+      !formData.fullName ||
+      !formData.phone ||
+      !formData.gender ||
+      !formData.religion ||
+      !formData.schoolDivision ||
+      !formData.schoolDistrict ||
+      !formData.schoolUpazila ||
+      !formData.schoolUnion ||
+      !formData.schoolName ||
+      !formData.class
+    ) {
+      alert("Please fill in all required fields.");
+      return;
+    }
+
+    try {
+      // Save profile update
+      await updateUserProfile(user.uid, formData);
+      navigate("/dashboard");
+    } catch (err) {
+      alert("Failed to update profile.");
+      console.error(err);
+    }
   };
 
-  if (loading || profileLoading) return <p className="text-center mt-10">Loading...</p>;
+  if (loading) {
+    return <div className="p-4 text-center">Loading profile...</div>;
+  }
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-lg mx-auto mt-10 p-6 bg-white rounded-2xl shadow-md space-y-4">
-      <h2 className="text-2xl font-bold text-center text-gray-800">Edit Profile</h2>
+    <div className="max-w-2xl mx-auto p-4">
+      <h2 className="text-2xl font-semibold mb-4">Edit Profile</h2>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <input
+          type="text"
+          name="fullName"
+          placeholder="Full Name"
+          value={formData.fullName}
+          onChange={handleChange}
+          className="w-full p-2 border rounded"
+          required
+        />
 
-      <input
-        name="name"
-        placeholder="Full Name"
-        value={formData.name}
-        onChange={handleChange}
-        required
-        className="w-full px-4 py-2 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-      />
+        <input
+          type="tel"
+          name="phone"
+          placeholder="Phone Number"
+          value={formData.phone}
+          onChange={handleChange}
+          className="w-full p-2 border rounded"
+          required
+        />
 
-      <input
-        name="upazila"
-        placeholder="Upazila"
-        value={formData.upazila}
-        onChange={handleChange}
-        required
-        className="w-full px-4 py-2 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-      />
+        <select
+          name="gender"
+          value={formData.gender}
+          onChange={handleChange}
+          className="w-full p-2 border rounded"
+          required
+        >
+          <option value="">Select Gender</option>
+          {genderOptions.map((g) => (
+            <option key={g} value={g}>
+              {g}
+            </option>
+          ))}
+        </select>
 
-      <input
-        name="institution"
-        placeholder="Institution Name"
-        value={formData.institution}
-        onChange={handleChange}
-        required
-        className="w-full px-4 py-2 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-      />
+        <select
+          name="religion"
+          value={formData.religion}
+          onChange={handleChange}
+          className="w-full p-2 border rounded"
+          required
+        >
+          <option value="">Select Religion</option>
+          {religionOptions.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
 
-      <select
-        name="grade"
-        value={formData.grade}
-        onChange={handleChange}
-        required
-        className="w-full px-4 py-2 border rounded-xl bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-      >
-        <option value="">Select Your Grade/Level</option>
-        {[
-          'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7',
-          'Class 8', 'Class 9', 'Class 10', 'HSC 1st Year', 'HSC 2nd Year',
-          'BA/BSc 1st Year', '2nd Year', '3rd Year', '4th Year', 'MA/MSc'
-        ].map((grade, idx) => (
-          <option key={idx} value={grade}>{grade}</option>
-        ))}
-      </select>
+        <select
+          name="schoolDivision"
+          value={formData.schoolDivision}
+          onChange={handleChange}
+          className="w-full p-2 border rounded"
+          required
+        >
+          <option value="">Select Division</option>
+          {Object.keys(schoolOptions).map((division) => (
+            <option key={division} value={division}>
+              {division}
+            </option>
+          ))}
+        </select>
 
-      <button
-        type="submit"
-        className="w-full py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition duration-200"
-      >
-        Save Changes
-      </button>
-    </form>
+        <select
+          name="schoolDistrict"
+          value={formData.schoolDistrict}
+          onChange={handleChange}
+          className="w-full p-2 border rounded"
+          required
+          disabled={!filteredDistricts.length}
+        >
+          <option value="">Select District</option>
+          {filteredDistricts.map((district) => (
+            <option key={district} value={district}>
+              {district}
+            </option>
+          ))}
+        </select>
+
+        <select
+          name="schoolUpazila"
+          value={formData.schoolUpazila}
+          onChange={handleChange}
+          className="w-full p-2 border rounded"
+          required
+          disabled={!filteredUpazilas.length}
+        >
+          <option value="">Select Upazila</option>
+          {filteredUpazilas.map((upazila) => (
+            <option key={upazila} value={upazila}>
+              {upazila}
+            </option>
+          ))}
+        </select>
+
+        <select
+          name="schoolUnion"
+          value={formData.schoolUnion}
+          onChange={handleChange}
+          className="w-full p-2 border rounded"
+          required
+          disabled={!filteredUnions.length}
+        >
+          <option value="">Select Union / Pouroshava</option>
+          {filteredUnions.map((union) => (
+            <option key={union} value={union}>
+              {union}
+            </option>
+          ))}
+        </select>
+
+        <select
+          name="schoolName"
+          value={formData.schoolName}
+          onChange={handleChange}
+          className="w-full p-2 border rounded"
+          required
+          disabled={!filteredSchools.length}
+        >
+          <option value="">Select School</option>
+          {filteredSchools.map((schoolName) => (
+            <option key={schoolName} value={schoolName}>
+              {schoolName}
+            </option>
+          ))}
+        </select>
+
+        <select
+          name="class"
+          value={formData.class}
+          onChange={handleChange}
+          className="w-full p-2 border rounded"
+          required
+        >
+          <option value="">Select Class</option>
+          {classOptions.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+
+        <button
+          type="submit"
+          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+        >
+          Update Profile
+        </button>
+      </form>
+    </div>
   );
-}
+};
+
+export default EditProfilePage;

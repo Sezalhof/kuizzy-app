@@ -82,11 +82,12 @@ export default function FriendTabsView() {
               id: docSnap.id,
               uid: otherUid,
               name: profile.name || "",
-              email: profile.email || "",
-              phone: profile.phone || "",
+              grade: profile.grade || "",       // <-- added grade
+              school: profile.school || "",     // <-- added school
               fromId: req.fromId,
               toId: req.toId,
               status: req.status,
+              photoURL: profile.photoURL || "", // <-- profile pic URL
             };
           })
         );

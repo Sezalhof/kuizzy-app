@@ -124,16 +124,7 @@ export default function FriendSuggestionList() {
       return;
     }
 
-    const sortedIds = [user.uid, toId].sort();
-    const requestId = `${sortedIds[0]}_${sortedIds[1]}`;
-
     try {
-      const existing = await getDoc(doc(db, "friend_requests", requestId));
-      if (existing.exists()) {
-        toast.info("⚠️ Request already exists.");
-        return;
-      }
-
       await addDoc(collection(db, "friend_requests"), {
         fromId: user.uid,
         toId,
@@ -149,47 +140,61 @@ export default function FriendSuggestionList() {
   };
 
   if (!user || !userProfile) {
-    return <p className="text-sm text-gray-500">Loading suggestions...</p>;
+    return <p className="text-center text-gray-500 py-6">Loading suggestions...</p>;
   }
 
   if (suggestions.length === 0) {
-    return <p className="text-sm text-gray-500">No friend suggestions right now.</p>;
+    return <p className="text-center text-gray-500 py-6">No friend suggestions available.</p>;
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 px-2">
       {suggestions.map((sugg) => {
         const alreadySent = sentRequests.has(sugg.uid) || existingRequests.has(sugg.uid);
-
         return (
           <div
             key={sugg.uid}
-            className="border p-4 rounded bg-white shadow-sm hover:bg-gray-50 transition"
+            className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300 flex flex-col items-center"
           >
-            <p className="font-semibold text-blue-700">{sugg.name || "Unknown User"}</p>
-            <p className="text-xs text-gray-500">{sugg.email || sugg.uid}</p>
-
-            <div className="flex flex-wrap gap-2 text-xs mt-2">
-              {sugg.gender && (
-                <span className="bg-gray-100 px-2 py-0.5 rounded">👤 {sugg.gender}</span>
-              )}
-              {sugg.grade && (
-                <span className="bg-gray-100 px-2 py-0.5 rounded">📘 Class {sugg.grade}</span>
-              )}
-              <span className="bg-gray-100 px-2 py-0.5 rounded">🏫 {sugg.school}</span>
+            <img
+              src={sugg.avatar || "/default-avatar.png"}
+              alt={`${sugg.name || "User"} avatar`}
+              className="w-full h-48 object-cover"
+            />
+            <div className="p-4 w-full text-center">
+              <h3 className="text-lg font-semibold text-blue-700 truncate" title={sugg.name}>
+                {sugg.name || "Unknown User"}
+              </h3>
+              <p className="text-xs text-gray-500 truncate" title={sugg.email || sugg.uid}>
+                {sugg.email || sugg.uid}
+              </p>
+              <div className="flex flex-wrap justify-center gap-2 mt-3 text-xs text-gray-600">
+                {sugg.gender && (
+                  <span className="bg-gray-100 px-3 py-1 rounded-full select-none">
+                    👤 {sugg.gender}
+                  </span>
+                )}
+                {sugg.grade && (
+                  <span className="bg-gray-100 px-3 py-1 rounded-full select-none">
+                    📘 Class {sugg.grade}
+                  </span>
+                )}
+                <span className="bg-gray-100 px-3 py-1 rounded-full select-none">
+                  🏫 {sugg.school}
+                </span>
+              </div>
+              <button
+                onClick={() => sendRequest(sugg.uid)}
+                disabled={alreadySent}
+                className={`mt-6 w-full py-2 rounded text-sm font-medium transition-colors ${
+                  alreadySent
+                    ? "bg-gray-300 text-gray-600 cursor-not-allowed"
+                    : "bg-blue-600 text-white hover:bg-blue-700"
+                }`}
+              >
+                {alreadySent ? "🕓 Waiting" : "➕ Invite to Join"}
+              </button>
             </div>
-
-            <button
-              onClick={() => sendRequest(sugg.uid)}
-              disabled={alreadySent}
-              className={`mt-3 px-3 py-1 rounded text-sm ${
-                alreadySent
-                  ? "bg-gray-300 text-gray-600 cursor-not-allowed"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
-              }`}
-            >
-              {alreadySent ? "🕓 Waiting" : "➕ Invite to Join"}
-            </button>
           </div>
         );
       })}

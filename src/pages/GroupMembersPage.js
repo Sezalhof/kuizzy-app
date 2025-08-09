@@ -9,7 +9,7 @@ import { useUserProfile } from "../hooks/useUserProfile";
 export default function GroupMembersPage() {
   const { groupId } = useParams();
   const { user } = useAuth();
-    const {
+  const {
     profile,
     loading: profileLoading,
     error: profileError,
@@ -125,12 +125,25 @@ export default function GroupMembersPage() {
               key={member.uid}
               className="border p-3 rounded shadow-sm flex justify-between items-center"
             >
-              <div>
-                <p className="font-semibold">{member.name || "Unknown"}</p>
-                <p className="text-sm text-gray-600">
-                  Class: {member.grade || "N/A"} | School: {member.school || "N/A"}
-                </p>
+              <div className="flex items-center gap-3">
+                <img
+                  src={member.photoURL || member.avatar || "/fallback-logo.png"}
+                  alt={`${member.name || "Unknown"} avatar`}
+                  className="w-12 h-12 rounded-full object-cover flex-shrink-0"
+                  loading="lazy"
+                  onError={(e) => {
+                    e.target.onerror = null;
+                    e.target.src = "/fallback-logo.png";
+                  }}
+                />
+                <div>
+                  <p className="font-semibold">{member.name || "Unknown"}</p>
+                  <p className="text-sm text-gray-600">
+                    Class: {member.grade || "N/A"} | School: {member.school || "N/A"}
+                  </p>
+                </div>
               </div>
+
               {isOwner && member.uid !== user.uid && (
                 <button
                   onClick={() => handleRemoveMember(member.uid)}
@@ -155,12 +168,25 @@ export default function GroupMembersPage() {
                 key={f.uid}
                 className="flex justify-between items-center border rounded px-3 py-2"
               >
-                <div>
-                  <p className="font-medium">{f.name || f.email || "Unnamed"}</p>
-                  <p className="text-xs text-gray-500">
-                    Class: {f.grade || "N/A"} | School: {f.school || "N/A"}
-                  </p>
+                <div className="flex items-center gap-3">
+                  <img
+                    src={f.photoURL || f.avatar || "/fallback-logo.png"}
+                    alt={`${f.name || f.email || "Unnamed"} avatar`}
+                    className="w-10 h-10 rounded-full object-cover flex-shrink-0"
+                    loading="lazy"
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.src = "/fallback-logo.png";
+                    }}
+                  />
+                  <div>
+                    <p className="font-medium">{f.name || f.email || "Unnamed"}</p>
+                    <p className="text-xs text-gray-500">
+                      Class: {f.grade || "N/A"} | School: {f.school || "N/A"}
+                    </p>
+                  </div>
                 </div>
+
                 <button
                   onClick={() => handleAddMember(f.uid)}
                   className="text-sm text-blue-600 hover:underline"

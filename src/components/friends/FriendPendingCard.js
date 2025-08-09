@@ -6,8 +6,9 @@ import { toast } from "react-toastify";
 export default function FriendPendingCard({ request }) {
   const [userInfo, setUserInfo] = useState({
     name: "",
-    email: "",
-    phone: "",
+    grade: "",
+    school: "",
+    avatar: "/default-avatar.png",
   });
 
   const [loading, setLoading] = useState(false);
@@ -20,8 +21,9 @@ export default function FriendPendingCard({ request }) {
           const data = snap.data();
           setUserInfo({
             name: data.name || "Unknown",
-            email: data.email || "",
-            phone: data.phone || "",
+            grade: data.grade || "",
+            school: data.school || "",
+            avatar: data.avatar || "/default-avatar.png",
           });
         }
       } catch (err) {
@@ -59,25 +61,33 @@ export default function FriendPendingCard({ request }) {
   };
 
   return (
-    <div className="border p-4 rounded shadow-sm bg-white flex flex-col md:flex-row md:justify-between md:items-center">
-      <div>
-        <p className="font-semibold text-gray-800">{userInfo.name}</p>
-        <p className="text-sm text-gray-500">{userInfo.email}</p>
-        <p className="text-xs text-gray-400">{userInfo.phone}</p>
+    <div className="flex items-center justify-between bg-white rounded shadow-sm p-3 hover:shadow-md transition-shadow duration-200">
+      <div className="flex items-center space-x-3 min-w-0">
+        <img
+          src={userInfo.avatar}
+          alt={`${userInfo.name}'s avatar`}
+          className="w-12 h-12 rounded-full object-cover flex-shrink-0"
+          loading="lazy"
+        />
+        <div className="truncate min-w-0">
+          <p className="text-gray-900 font-semibold truncate">{userInfo.name}</p>
+          <p className="text-xs text-gray-500 truncate">📘 Class {userInfo.grade}</p>
+          <p className="text-xs text-gray-400 truncate">🏫 {userInfo.school}</p>
+        </div>
       </div>
 
-      <div className="mt-2 md:mt-0 flex gap-2">
+      <div className="flex gap-2">
         <button
           onClick={handleAccept}
           disabled={loading}
-          className="px-3 py-1 text-sm bg-green-100 hover:bg-green-200 rounded"
+          className="px-3 py-1 text-sm bg-green-100 hover:bg-green-200 rounded whitespace-nowrap"
         >
           {loading ? "Adding..." : "🎉 Join Team"}
         </button>
         <button
           onClick={handleReject}
           disabled={loading}
-          className="px-3 py-1 text-sm bg-red-100 hover:bg-red-200 rounded"
+          className="px-3 py-1 text-sm bg-red-100 hover:bg-red-200 rounded whitespace-nowrap"
         >
           {loading ? "Rejecting..." : "❌ No Thanks"}
         </button>
