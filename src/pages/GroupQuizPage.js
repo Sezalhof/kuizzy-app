@@ -1,10 +1,11 @@
-// src/pages/GroupQuizPage.js
 import React from "react";
 import { useParams } from "react-router-dom";
-import Quiz from "../components/Quiz"; // <-- Adjust relative to be inside src/
+import Quiz from "../components/Quiz";
 
 export default function GroupQuizPage() {
   const { groupId } = useParams();
+
+  console.log("[GroupQuizPage] groupId param:", groupId);  // <-- Add this
 
   return (
     <div className="p-4">

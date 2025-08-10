@@ -1,52 +1,6 @@
-// ✅ FILE: GroupLeaderboard.js (Updated & Scalable)
+import React from "react";
 
-import React, { useEffect, useState, useRef } from "react";
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "../firebase";
-import useAuth from "../hooks/useAuth";
-
-export default function GroupLeaderboard({ groupId, data }) {
-  const [userDetails, setUserDetails] = useState({});
-  const fetchedUserIds = useRef(new Set());
-  const { user: currentUser } = useAuth();
-
-  useEffect(() => {
-    if (!data?.length) return;
-
-    const fetchUserDetails = async () => {
-      const newDetails = {};
-
-      await Promise.all(
-        data.map(async (entry) => {
-          const uid = entry.userId;
-          if (!uid || fetchedUserIds.current.has(uid)) return;
-
-          try {
-            const docRef = doc(db, "users", uid);
-            const snap = await getDoc(docRef);
-            if (snap.exists()) {
-              const { name, email } = snap.data();
-              newDetails[uid] = {
-                name: name || "Unknown",
-                email: email || uid,
-              };
-            } else {
-              newDetails[uid] = { name: "Unknown", email: uid };
-            }
-          } catch {
-            newDetails[uid] = { name: "Unknown", email: uid };
-          }
-
-          fetchedUserIds.current.add(uid);
-        })
-      );
-
-      setUserDetails((prev) => ({ ...prev, ...newDetails }));
-    };
-
-    fetchUserDetails();
-  }, [data]);
-
+export default function GroupLeaderboard({ data }) {
   if (!data || data.length === 0) {
     return (
       <p className="text-center text-gray-500 mt-6">
@@ -55,12 +9,18 @@ export default function GroupLeaderboard({ groupId, data }) {
     );
   }
 
+  // Sort by score descending, then by time ascending (including millisec if available)
   const sortedData = [...data]
     .map((entry) => ({
       ...entry,
       timeTaken: entry.timeTaken ?? entry.time ?? 9999,
+      timeMillis: entry.timeMillis ?? 0, // optional millisec field
     }))
-    .sort((a, b) => b.score - a.score || a.timeTaken - b.timeTaken)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (a.timeTaken !== b.timeTaken) return a.timeTaken - b.timeTaken;
+      return a.timeMillis - b.timeMillis;
+    })
     .slice(0, 10);
 
   return (
@@ -74,17 +34,13 @@ export default function GroupLeaderboard({ groupId, data }) {
           <thead className="bg-gray-50">
             <tr>
               <TableHeader title="Rank" />
-              <TableHeader title="Name" />
-              <TableHeader title="Email" />
+              <TableHeader title="Username" />
               <TableHeader title="Score" />
-              <TableHeader title="Time Taken" />
+              <TableHeader title="Time (s.ms)" />
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {sortedData.map((entry, index) => {
-              const userInfo = userDetails[entry.userId] || {};
-              const isCurrentUser = currentUser?.uid === entry.userId;
-
               return (
                 <tr
                   key={entry.id || index}
@@ -96,22 +52,21 @@ export default function GroupLeaderboard({ groupId, data }) {
                       : index === 2
                       ? "bg-orange-100"
                       : ""
-                  } ${isCurrentUser ? "ring-2 ring-blue-400" : ""}`}
+                  }`}
                 >
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-800">
                     {index + 1}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {userInfo.name || "Loading..."}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {userInfo.email || entry.userId}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">
+                    {entry.username || entry.email || "Unknown"}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-green-700">
                     {entry.score} pts
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                    {/* Format seconds and millis */}
                     {entry.timeTaken}s
+                    {entry.timeMillis ? `.${entry.timeMillis.toString().padStart(3, "0")}` : ""}
                   </td>
                 </tr>
               );

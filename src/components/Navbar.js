@@ -41,7 +41,7 @@ export default function Navbar({ user, profile, onLogout }) {
           </>
         )}
 
-        {user && (userRole === "admin" || userRole === "teacher") && (
+        {(userRole === "admin" || userRole === "teacher") && user && (
           <Link to="/admin" className="hover:underline">Admin Dashboard</Link>
         )}
 
@@ -55,9 +55,13 @@ export default function Navbar({ user, profile, onLogout }) {
         {user ? (
           <div className="flex items-center gap-2">
             <img
-              src={user.photoURL || fallbackLogo}
+              src={profile?.photoURL || user.photoURL || fallbackLogo}
               alt="User"
-              className="w-8 h-8 rounded-full"
+              className="w-8 h-8 rounded-full object-cover"
+              onError={(e) => {
+                e.target.onerror = null;
+                e.target.src = fallbackLogo;
+              }}
             />
             <span className="text-sm font-medium truncate max-w-[150px]">
               {profile?.name || user.displayName || user.email}

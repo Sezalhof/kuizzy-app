@@ -12,15 +12,27 @@ export default function Leaderboard({ data, currentUserId }) {
       await Promise.all(
         data.map(async (entry) => {
           const uid = entry.userId;
-          if (!uid || newDetails[uid] || userDetails[uid]) return;
+          if (!uid) return;
+
+          // If entry already has username, no need to fetch user doc
+          if (entry.username) {
+            newDetails[uid] = {
+              name: entry.username,
+              email: entry.email || uid,
+            };
+            return;
+          }
+
+          // Else fetch user details only if not already cached
+          if (userDetails[uid] || newDetails[uid]) return;
 
           try {
             const docRef = doc(db, "users", uid);
             const snap = await getDoc(docRef);
             if (snap.exists()) {
-              const { name, email } = snap.data();
+              const { username, name, email } = snap.data();
               newDetails[uid] = {
-                name: name || "Unknown",
+                name: username || name || "Unknown",
                 email: email || uid,
               };
             } else {
@@ -36,7 +48,8 @@ export default function Leaderboard({ data, currentUserId }) {
     };
 
     if (data?.length) fetchUserDetails();
-  }, [data, userDetails]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]); // removed userDetails dependency to prevent infinite loop
 
   if (!data || data.length === 0) {
     return <p className="text-center text-gray-500">No leaderboard data yet.</p>;
@@ -70,7 +83,10 @@ export default function Leaderboard({ data, currentUserId }) {
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {sortedData.map((entry, index) => {
-              const userInfo = userDetails[entry.userId] || {};
+              const userInfo = userDetails[entry.userId] || {
+                name: entry.username || "Loading...",
+                email: entry.email || entry.userId,
+              };
               const isCurrent = currentUserId === entry.userId;
 
               return (
@@ -90,10 +106,10 @@ export default function Leaderboard({ data, currentUserId }) {
                     {index + 1}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {userInfo.name || "Loading..."}
+                    {userInfo.name}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {userInfo.email || entry.userId}
+                    {userInfo.email}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-green-700">
                     {entry.score} pts

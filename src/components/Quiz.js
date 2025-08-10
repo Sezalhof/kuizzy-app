@@ -1,20 +1,26 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { addDoc, collection, doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import useAuth from "../hooks/useAuth";
+import { useUserProfile } from "../hooks/useUserProfile";
 import { toast } from "react-toastify";
 import { ensureUserInGroup } from "../utils/groupHelpers";
 import { CheckCircleIcon, XCircleIcon } from "@heroicons/react/20/solid";
 import clsx from "clsx";
 
-export default function Quiz({ groupId = null, onComplete }) {
+export default function Quiz({ groupId: propGroupId = null, onComplete }) {
   const { user } = useAuth();
+  const { profile, loading: profileLoading } = useUserProfile(user?.uid);
+
+  // Store stable groupId in a ref
+  const groupIdRef = useRef(propGroupId);
+
   const [score, setScore] = useState(0);
   const [timeTaken, setTimeTaken] = useState(0);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [startTime, setStartTime] = useState(Date.now());
-  const [groupUid, setGroupUid] = useState(null); // 🔹 added
+  const [groupUid, setGroupUid] = useState(null);
 
   const questions = [
     { id: 1, question: "What is 2 + 2?", options: ["3", "4", "5", "6"], correctAnswer: "4" },
@@ -27,22 +33,22 @@ export default function Quiz({ groupId = null, onComplete }) {
   const [feedback, setFeedback] = useState(null);
   const currentQuestion = questions[questionIndex];
 
-  // 🔹 Load groupUid on mount
+  // Fetch groupUid for completeness (optional)
   useEffect(() => {
     const fetchGroupUid = async () => {
-      if (!groupId) return;
+      if (!groupIdRef.current) return;
       try {
-        const docSnap = await getDoc(doc(db, "groups", groupId));
+        const docSnap = await getDoc(doc(db, "groups", groupIdRef.current));
         if (docSnap.exists()) {
           const data = docSnap.data();
-          setGroupUid(data.groupUid || groupId); // fallback to doc ID
+          setGroupUid(data.groupUid || groupIdRef.current);
         }
       } catch (err) {
         console.error("[Quiz] Failed to fetch groupUid:", err);
       }
     };
     fetchGroupUid();
-  }, [groupId]);
+  }, []);
 
   const handleOptionClick = (option) => {
     if (selectedOption) return;
@@ -67,40 +73,61 @@ export default function Quiz({ groupId = null, onComplete }) {
   };
 
   const submitFinalScore = async () => {
-    const endTime = Date.now();
-    const duration = Math.floor((endTime - startTime) / 1000);
-    setTimeTaken(duration);
+    console.log("[Quiz] submitFinalScore called");
+    console.log("[Quiz] user:", user);
+    console.log("[Quiz] groupIdRef.current:", groupIdRef.current);
+    console.log("[Quiz] profileLoading:", profileLoading);
+    console.log("[Quiz] profile:", profile);
 
     if (!user) {
       toast.error("You must be logged in to submit.");
       return;
     }
-
-    if (!groupId) {
+    if (!groupIdRef.current) {
       toast.error("❌ Cannot submit score: Group ID is missing.");
       return;
     }
+    if (profileLoading) {
+      toast.error("Profile loading. Please wait.");
+      return;
+    }
+    if (!profile) {
+      toast.error("User profile missing. Cannot submit.");
+      return;
+    }
+
+    const endTime = Date.now();
+    const duration = Math.floor((endTime - startTime) / 1000);
+    setTimeTaken(duration);
 
     setSubmitting(true);
     try {
-      await ensureUserInGroup(groupId, user.uid);
+      console.log("[Quiz] Calling ensureUserInGroup with groupId:", groupIdRef.current, "and userId:", user.uid);
+      await ensureUserInGroup(groupIdRef.current, user.uid);
 
       await addDoc(collection(db, "scores"), {
         userId: user.uid,
-        email: user.email,
         score,
         timeTaken: duration,
         timestamp: Date.now(),
-        groupId,
-        groupUid: groupUid || groupId, // ✅ fixed
+        groupId: groupIdRef.current,
+        groupUid: groupUid || groupIdRef.current,
+
+        // Attach user profile location fields to enable leaderboard filtering:
+        school: profile.school || null,
+        union: profile.union || null,
+        upazila: profile.upazila || null,
+        district: profile.district || null,
+        division: profile.division || null,
+
+        // Optional caching info for display:
+        username: profile.username || profile.name || "Unknown",
+        email: user.email || null,
       });
 
       setSubmitted(true);
       toast.success("🎉 Quiz submitted successfully!");
-
-      if (onComplete) {
-        onComplete(score, duration, groupUid || groupId);
-      }
+      if (onComplete) onComplete(score, duration, groupUid || groupIdRef.current);
     } catch (err) {
       console.error("❌ Quiz submission failed:", err);
       toast.error("❌ Failed to submit quiz");
