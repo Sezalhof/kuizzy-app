@@ -9,7 +9,7 @@ import StudentDashboard from "../pages/student/StudentDashboard";
 import AdminDashboard from "../pages/admin/AdminDashboard";
 import FriendsPage from "../pages/FriendsPage";
 import GroupsPage from "../pages/GroupsPage";
-import QuizPage from "../pages/QuizPage";
+import TestPage from "../pages/TestPage";
 import LeaderboardPage from "../pages/LeaderboardPage";
 import GroupMembersPage from "../pages/GroupMembersPage";
 import GroupQuizPage from "../pages/GroupQuizPage";
@@ -318,18 +318,19 @@ export default function AppRoutes({
         }
       />
 
-      <Route
-        path={ROUTES.QUIZ}
-        element={
-          <ProtectedRoute>
-            <QuizPage
-              {...commonProps}
-              onComplete={handleQuizComplete}
-              quizCompleted={quizCompleted}
-            />
-          </ProtectedRoute>
-        }
+<Route
+  path={ROUTES.QUIZ}  // or update ROUTES.QUIZ to '/tests' if you want
+  element={
+    <ProtectedRoute>
+      <TestPage
+        {...commonProps}
+        onComplete={handleQuizComplete}
+        quizCompleted={quizCompleted}
       />
+    </ProtectedRoute>
+  }
+/>
+
 
       <Route
         path={ROUTES.LEADERBOARD}

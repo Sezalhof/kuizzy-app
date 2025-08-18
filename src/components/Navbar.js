@@ -1,11 +1,14 @@
+// src/components/Navbar.jsx
 import React from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import fallbackLogo from "../assets/fallback-logo.png";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
 
 export default function Navbar({ user, profile, onLogout }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const userRole = profile?.role;
 
   const handleLogout = async () => {
     try {
@@ -17,7 +20,7 @@ export default function Navbar({ user, profile, onLogout }) {
     }
   };
 
-  const userRole = profile?.role;
+  const isActive = (path) => location.pathname === path;
 
   return (
     <nav className="bg-white shadow-md p-4 flex justify-between items-center">
@@ -29,24 +32,77 @@ export default function Navbar({ user, profile, onLogout }) {
 
       {/* Links */}
       <div className="flex gap-4 items-center">
-        <Link to="/" className="hover:underline">Home</Link>
+        <Link
+          to="/"
+          className={`hover:underline ${isActive("/") ? "font-bold" : ""}`}
+        >
+          Home
+        </Link>
 
+        {/* Student Links */}
         {user && userRole === "student" && (
           <>
-            <Link to="/dashboard" className="hover:underline">Dashboard</Link>
-            <Link to="/friends" className="hover:underline">Friends</Link>
-            <Link to="/groups" className="hover:underline">Groups</Link>
-            <Link to="/leaderboard" className="hover:underline">Leaderboard</Link>
-            <Link to="/quiz" className="hover:underline">Quiz</Link>
+            <Link
+              to="/dashboard"
+              className={`hover:underline ${isActive("/dashboard") ? "font-bold" : ""}`}
+            >
+              Dashboard
+            </Link>
+            <Link
+              to="/friends"
+              className={`hover:underline ${isActive("/friends") ? "font-bold" : ""}`}
+            >
+              Friends
+            </Link>
+            <Link
+              to="/groups"
+              className={`hover:underline ${isActive("/groups") ? "font-bold" : ""}`}
+            >
+              Groups
+            </Link>
+            <Link
+              to="/leaderboard?scope=global"
+              className={`hover:underline ${isActive("/leaderboard") ? "font-bold" : ""}`}
+            >
+              Leaderboard
+            </Link>
+            <Link
+              to="/quiz"
+              className={`hover:underline ${isActive("/quiz") ? "font-bold" : ""}`}
+            >
+              Quiz
+            </Link>
           </>
         )}
 
+        {/* Admin/Teacher Links */}
         {(userRole === "admin" || userRole === "teacher") && user && (
-          <Link to="/admin" className="hover:underline">Admin Dashboard</Link>
+          <Link
+            to="/admin"
+            className={`hover:underline ${isActive("/admin") ? "font-bold" : ""}`}
+          >
+            Admin Dashboard
+          </Link>
         )}
 
+        {/* Enroll Link for logged-in users without role */}
         {user && !userRole && (
-          <Link to="/enroll" className="hover:underline">Enroll</Link>
+          <Link
+            to="/enroll"
+            className={`hover:underline ${isActive("/enroll") ? "font-bold" : ""}`}
+          >
+            Enroll
+          </Link>
+        )}
+
+        {/* Leaderboard for guests */}
+        {!user && (
+          <Link
+            to="/leaderboard?scope=global"
+            className={`hover:underline ${isActive("/leaderboard") ? "font-bold" : ""}`}
+          >
+            Leaderboard
+          </Link>
         )}
       </div>
 

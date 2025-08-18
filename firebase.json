@@ -22,19 +22,40 @@
       }
     ]
   },
+  "storage": {
+    "rules": "storage.rules"
+  },
   "emulators": {
     "functions": {
+      "host": "127.0.0.1",
       "port": 5001
     },
     "firestore": {
+      "host": "127.0.0.1",
       "port": 8085
     },
+    "auth": {
+      "host": "127.0.0.1",
+      "port": 9099
+    },
     "hosting": {
+      "host": "127.0.0.1",
       "port": 5000
+    },
+    "storage": {
+      "host": "127.0.0.1",
+      "port": 9199
     },
     "ui": {
       "enabled": true,
+      "host": "127.0.0.1",
       "port": 4001
-    }
+    },
+    "apphosting": {
+      "port": 5002,
+      "rootDirectory": "build",
+      "startCommand": "npm start"
+    },
+    "singleProjectMode": true
   }
 }

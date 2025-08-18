@@ -1,0 +1,35 @@
+[
+    {
+      "id": "g3-math-1",
+      "title": "Addition Basics",
+      "duration": 600,
+      "questions": [
+        {
+          "id": "q1",
+          "text": "What is 5 + 3?",
+          "options": ["6", "7", "8", "9"],
+          "answer": "8"
+        },
+        {
+          "id": "q2",
+          "text": "What is 10 - 4?",
+          "options": ["6", "7", "5", "8"],
+          "answer": "6"
+        }
+      ]
+    },
+    {
+      "id": "g3-math-2",
+      "title": "Subtraction Basics",
+      "duration": 600,
+      "questions": [
+        {
+          "id": "q1",
+          "text": "What is 7 - 2?",
+          "options": ["4", "5", "6", "7"],
+          "answer": "5"
+        }
+      ]
+    }
+  ]
+  

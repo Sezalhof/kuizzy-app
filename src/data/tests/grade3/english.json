@@ -1,0 +1,16 @@
+[
+    {
+      "id": "g3-eng-1",
+      "title": "Basic Vocabulary",
+      "duration": 600,
+      "questions": [
+        {
+          "id": "q1",
+          "text": "Choose the synonym for 'happy'",
+          "options": ["sad", "joyful", "angry", "tired"],
+          "answer": "joyful"
+        }
+      ]
+    }
+  ]
+  

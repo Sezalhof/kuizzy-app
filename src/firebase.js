@@ -1,23 +1,33 @@
-import { initializeApp, getApps } from "firebase/app";
+// src/firebase.js
+import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
-import { getStorage } from "firebase/storage"; // ✅ Add this
+import { getFirestore, serverTimestamp } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 
+// --- Production Firebase config ---
 const firebaseConfig = {
   apiKey: "AIzaSyDd9N0VU6hAu3Iiv4QYJcg51GpThtAkeVs",
   authDomain: "kuizzy-app.firebaseapp.com",
   projectId: "kuizzy-app",
-  storageBucket: "kuizzy-app.firebasestorage.app", // ✅ FIXED
+  // NOTE: the canonical bucket domain is *.appspot.com
+  storageBucket: "kuizzy-app.appspot.com",
   messagingSenderId: "539841603951",
   appId: "1:539841603951:web:c013ba0b82de73125e209a",
 };
 
-const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+// Initialize once (avoid re-init during hot reload)
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-export const auth = getAuth(app);
-export const provider = new GoogleAuthProvider();
-export const db = getFirestore(app);
-export const storage = getStorage(app); // ✅ Now you can use this in upload code
+// --- Firebase services ---
+const auth = getAuth(app);
+const provider = new GoogleAuthProvider();
+const db = getFirestore(app);
+const storage = getStorage(app);
 
-export { app };
-window.getCurrentUid = () => getAuth().currentUser?.uid;
+// Optional helper for quick debugging (safe in dev)
+if (typeof window !== "undefined") {
+  window.getCurrentUid = () => auth.currentUser?.uid ?? null;
+}
+
+// Named exports used across your app
+export { app, auth, provider, db, storage, serverTimestamp };

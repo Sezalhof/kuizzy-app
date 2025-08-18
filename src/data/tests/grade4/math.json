@@ -1,0 +1,16 @@
+[
+    {
+      "id": "g4-math-1",
+      "title": "Multiplication Basics",
+      "duration": 900,
+      "questions": [
+        {
+          "id": "q1",
+          "text": "What is 4 x 3?",
+          "options": ["7", "12", "15", "10"],
+          "answer": "12"
+        }
+      ]
+    }
+  ]
+  

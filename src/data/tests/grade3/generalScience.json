@@ -1,0 +1,16 @@
+[
+    {
+      "id": "g3-gs-1",
+      "title": "Animals",
+      "duration": 600,
+      "questions": [
+        {
+          "id": "q1",
+          "text": "Which animal barks?",
+          "options": ["Cat", "Dog", "Bird", "Cow"],
+          "answer": "Dog"
+        }
+      ]
+    }
+  ]
+  

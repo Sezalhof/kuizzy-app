@@ -1,0 +1,24 @@
+[
+    {
+      "id": "t1",
+      "title": "Basic Math Test",
+      "grade": "Class 6",
+      "subject": "math",
+      "duration": 900,
+      "questions": [
+        {
+          "id": "q1",
+          "text": "What is 2 + 2?",
+          "options": ["3", "4", "5", "6"],
+          "correct": 1
+        },
+        {
+          "id": "q2",
+          "text": "What is 10 / 2?",
+          "options": ["3", "4", "5", "6"],
+          "correct": 2
+        }
+      ]
+    }
+  ]
+  
