@@ -22,7 +22,7 @@ import {
 const SCOPES = [
   { key: "global", label: "Global" },
   { key: "school", label: "School" },
-  { key: "team", label: "Team" }, // group/team by users (from scores)
+  { key: "group", label: "Group" }, // group/group by users (from scores)
   { key: "union", label: "Union/Pouroshava" },
   { key: "upazila", label: "Upazila" },
   { key: "district", label: "District" },
@@ -34,8 +34,8 @@ const STORAGE_PREFIX = "kuizzy_leaderboard_";
 const CACHE_EXPIRATION = 1000 * 60 * 60 * 24; // 24h
 
 function getStorageKey(scopeKey, userId, period, groupId = null) {
-  return scopeKey === "team"
-    ? `${STORAGE_PREFIX}${userId}_team_${groupId || "self"}_${period}`
+  return scopeKey === "group"
+    ? `${STORAGE_PREFIX}${userId}_group_${groupId || "self"}_${period}`
     : `${STORAGE_PREFIX}${userId}_${scopeKey}_${period}`;
 }
 
@@ -58,12 +58,6 @@ function loadCachedLeaderboard(scopeKey, userId, period, groupId = null) {
     // favor fresh data during peak hours; allow stale off-peak (quota friendliness)
     if (age > CACHE_EXPIRATION && !isOffPeakUSCentral()) return null;
 
-    console.debug("[LeaderboardPage] Cache hit", {
-      scopeKey,
-      key,
-      count: parsed.entries.length,
-      ageMs: age,
-    });
     return parsed;
   } catch (e) {
     console.warn("[LeaderboardPage] Cache parse failed", e);
@@ -127,11 +121,11 @@ function LeaderboardControls({
           </>
         )}
 
-        {selectedScope === "team" && (
+        {selectedScope === "group" && (
           <>
             <input
               className="border rounded px-2 py-1"
-              placeholder="Team/Group ID (leave blank to use your profile team)"
+              placeholder="Group/Group ID (leave blank to use your profile group)"
               value={groupId}
               onChange={(e) => setGroupId(e.target.value)}
             />
@@ -139,7 +133,7 @@ function LeaderboardControls({
               className="border rounded px-2 py-1 bg-gray-50"
               value={groupName}
               onChange={(e) => setGroupName(e.target.value)}
-              placeholder="Team Name (optional)"
+              placeholder="Group Name (optional)"
             />
           </>
         )}
@@ -170,7 +164,6 @@ function UserRankCard({ userRankInfo }) {
 }
 
 export default function LeaderboardPage({ schoolId: propSchoolId, groupId: propGroupId }) {
-  console.log("[LeaderboardPage] Mounted");
   const { user, authLoading } = useAuth();
 
   // UI state
@@ -192,8 +185,14 @@ export default function LeaderboardPage({ schoolId: propSchoolId, groupId: propG
   const [extraLoadingScopes, setExtraLoadingScopes] = useState({});
   const [extraErrors, setExtraErrors] = useState({});
   const extraLoadingMoreRef = useRef({});
+  
+  // Track what's been initialized to prevent re-runs
+  const profileFetchedRef = useRef(false);
+  const profileSeededRef = useRef(false);
+  const extraCacheLoadedRef = useRef(false);
+  const dataFetchTriggeredRef = useRef({});
 
-  // ✅ Use the aggregated hook for global/school/team
+  // ✅ Use the aggregated hook for global/school/group
   const {
     leaderboards: aggLeaderboards,
     loadingScopes: aggLoadingScopes,
@@ -201,30 +200,46 @@ export default function LeaderboardPage({ schoolId: propSchoolId, groupId: propG
     period: hookPeriod,
     setPeriod: setHookPeriod,
     loadLeaderboardPage: aggLoadLeaderboardPage,
-    refreshLeaderboard: aggRefresh,
   } = useAggregatedLeaderboard(user?.uid || null, userProfile);
+
+  // Memoized profile data to prevent unnecessary re-renders
+  const profileData = useMemo(() => userProfile ? {
+    schoolId: userProfile.schoolId,
+    schoolName: userProfile.schoolName,
+    groupId: userProfile.groupId,
+    groupName: userProfile.groupName,
+    unionId: userProfile.unionId,
+    upazilaId: userProfile.upazilaId,
+    districtId: userProfile.districtId,
+    divisionId: userProfile.divisionId,
+  } : null, [userProfile]);
 
   // single source of truth for period (sync hook <-> page)
   useEffect(() => {
-    if (hookPeriod !== period) setHookPeriod(period);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period]);
+    if (hookPeriod !== period) {
+      setHookPeriod(period);
+    }
+  }, [period, hookPeriod, setHookPeriod]);
 
-  // ---- Fetch profile (v9 modular)
+  // ---- Fetch profile (v9 modular) - only run once per user
   useEffect(() => {
-    if (authLoading) return;
+    const userKey = user?.uid || 'no-user';
+    if (authLoading || profileFetchedRef.current === userKey) return;
+    
     if (!user) {
       setProfileLoading(false);
+      profileFetchedRef.current = userKey;
       return;
     }
+    
+    profileFetchedRef.current = userKey;
     let mounted = true;
+    
     (async () => {
       try {
-        console.debug("[LeaderboardPage] Fetching profile for", user.uid);
         const snap = await getDoc(doc(db, "users", user.uid));
         if (mounted && snap.exists()) {
           const data = snap.data();
-          console.debug("[LeaderboardPage] Profile data:", data);
           setUserProfile(data);
         } else {
           console.warn("[LeaderboardPage] Profile missing");
@@ -237,30 +252,30 @@ export default function LeaderboardPage({ schoolId: propSchoolId, groupId: propG
         if (mounted) setProfileLoading(false);
       }
     })();
+    
     return () => {
       mounted = false;
     };
-  }, [user, authLoading]);
+  }, [user?.uid, authLoading]);
 
-  // seed IDs from profile (once available)
+  // seed IDs from profile (once available) - only run once per profile
   useEffect(() => {
-    if (!userProfile) return;
-    if (userProfile.schoolId) setSchoolId((prev) => prev || userProfile.schoolId);
-    if (userProfile.schoolName) setSchoolName((prev) => prev || userProfile.schoolName);
-    if (userProfile.teamId) setGroupId((prev) => prev || userProfile.teamId);
-    if (userProfile.teamName) setGroupName((prev) => prev || userProfile.teamName);
-  }, [userProfile]);
+    const profileKey = profileData ? JSON.stringify(profileData) : 'no-profile';
+    if (!profileData || profileSeededRef.current === profileKey) return;
+    
+    profileSeededRef.current = profileKey;
+    
+    if (profileData.schoolId) setSchoolId((prev) => prev || profileData.schoolId);
+    if (profileData.schoolName) setSchoolName((prev) => prev || profileData.schoolName);
+    if (profileData.groupId) setGroupId((prev) => prev || profileData.groupId);
+    if (profileData.groupName) setGroupName((prev) => prev || profileData.groupName);
+  }, [profileData]);
 
   // ---------- Local fetching for extra scopes (union/upazila/district/division) ----------
 
-  const isExtraScope = useMemo(
-    () => ["union", "upazila", "district", "division"],
-    []
-  );
-
   const buildExtraScopeQuery = useCallback(
     (scopeKey, startAfterDoc = null) => {
-      if (!user) return null;
+      if (!user || !profileData) return null;
 
       let field = null;
       let value = null;
@@ -268,19 +283,19 @@ export default function LeaderboardPage({ schoolId: propSchoolId, groupId: propG
       switch (scopeKey) {
         case "union":
           field = "unionId";
-          value = userProfile?.unionId || null;
+          value = profileData.unionId || null;
           break;
         case "upazila":
           field = "upazilaId";
-          value = userProfile?.upazilaId || null;
+          value = profileData.upazilaId || null;
           break;
         case "district":
           field = "districtId";
-          value = userProfile?.districtId || null;
+          value = profileData.districtId || null;
           break;
         case "division":
           field = "divisionId";
-          value = userProfile?.divisionId || null;
+          value = profileData.divisionId || null;
           break;
         default:
           return null;
@@ -303,23 +318,14 @@ export default function LeaderboardPage({ schoolId: propSchoolId, groupId: propG
         q = query(q, startAfter(startAfterDoc));
       }
 
-      console.debug("[LeaderboardPage] Built extra scope query", {
-        scopeKey,
-        where: { [field]: value },
-        orderBy: ["combinedScore desc", "timeTaken asc"],
-        pageSize: PAGE_SIZE,
-        startAfterId: startAfterDoc?.id || null,
-      });
-
       return q;
     },
-    [user, userProfile]
+    [user, profileData]
   );
 
   const loadExtraScopePage = useCallback(
     async (scopeKey, isLoadMore = false) => {
-      if (!user) return;
-      if (extraLoadingMoreRef.current[scopeKey]) return;
+      if (!user || extraLoadingMoreRef.current[scopeKey]) return;
 
       setExtraErrors((prev) => ({ ...prev, [scopeKey]: null }));
       setExtraLoadingScopes((prev) => ({ ...prev, [scopeKey]: true }));
@@ -332,7 +338,6 @@ export default function LeaderboardPage({ schoolId: propSchoolId, groupId: propG
           hasMore: true,
         };
         if (!currentData.hasMore && isLoadMore) {
-          console.debug("[LeaderboardPage] No more pages for extra scope", scopeKey);
           return;
         }
 
@@ -344,18 +349,10 @@ export default function LeaderboardPage({ schoolId: propSchoolId, groupId: propG
           return;
         }
 
-        console.debug("[LeaderboardPage] Fetch (extra scope) Firestore for", scopeKey);
         const snap = await getDocs(q);
         const newEntries = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         const hasMore = snap.docs.length === PAGE_SIZE;
         const updatedEntries = isLoadMore ? [...currentData.entries, ...newEntries] : newEntries;
-
-        console.debug("[LeaderboardPage] Fetch (extra scope) done", {
-          scopeKey,
-          fetched: newEntries.length,
-          total: updatedEntries.length,
-          hasMore,
-        });
 
         // cache (separate key pattern is fine)
         try {
@@ -369,11 +366,6 @@ export default function LeaderboardPage({ schoolId: propSchoolId, groupId: propG
               lastUpdated: Date.now(),
             })
           );
-          console.debug("[LeaderboardPage] Cache (extra scope) saved", {
-            scopeKey,
-            cacheKey,
-            total: updatedEntries.length,
-          });
         } catch (e) {
           console.warn("[LeaderboardPage] Cache write (extra scope) failed", e);
         }
@@ -400,10 +392,14 @@ export default function LeaderboardPage({ schoolId: propSchoolId, groupId: propG
     [user, period, extraLeaderboards, buildExtraScopeQuery]
   );
 
-  // ---- Load cached data for extra scopes on mount / changes
+  // ---- Load cached data for extra scopes - only run once per user/period
   useEffect(() => {
-    if (!user) return;
+    const cacheKey = `${user?.uid}-${period}`;
+    if (!user || extraCacheLoadedRef.current === cacheKey) return;
+    
+    extraCacheLoadedRef.current = cacheKey;
     const cachedData = {};
+    
     ["union", "upazila", "district", "division"].forEach((key) => {
       const cache = loadCachedLeaderboard(key, user.uid, period, null);
       if (cache && cache.entries.length) {
@@ -414,17 +410,20 @@ export default function LeaderboardPage({ schoolId: propSchoolId, groupId: propG
         };
       }
     });
+    
     if (Object.keys(cachedData).length) {
-      console.debug("[LeaderboardPage] Seeded from cache (extra scopes):", Object.keys(cachedData));
       setExtraLeaderboards(cachedData);
     }
-  }, [user, period]);
+  }, [user?.uid, period]);
 
-  // ---- Ensure current scope has data (hook scopes vs extra scopes)
+  // ---- Ensure current scope has data - prevent multiple triggers for same scope
   useEffect(() => {
-    if (!user || profileLoading) return;
+    const triggerKey = `${user?.uid}-${selectedScope}-${period}`;
+    if (!user || profileLoading || dataFetchTriggeredRef.current[triggerKey]) return;
+    
+    dataFetchTriggeredRef.current[triggerKey] = true;
 
-    if (["global", "school", "team"].includes(selectedScope)) {
+    if (["global", "school", "group"].includes(selectedScope)) {
       const aggScopeData = aggLeaderboards[selectedScope];
       if (!aggScopeData || !aggScopeData.entries?.length) {
         console.debug("[LeaderboardPage] Trigger hook fetch for", selectedScope);
@@ -438,18 +437,30 @@ export default function LeaderboardPage({ schoolId: propSchoolId, groupId: propG
       }
     }
   }, [
-    user,
+    user?.uid,
     profileLoading,
     selectedScope,
+    period,
     aggLeaderboards,
     aggLoadLeaderboardPage,
     extraLeaderboards,
     loadExtraScopePage,
   ]);
 
+  // Reset fetch triggers when scope changes
+  useEffect(() => {
+    // Clear the trigger for the current scope when scope changes
+    const prevTriggers = { ...dataFetchTriggeredRef.current };
+    Object.keys(prevTriggers).forEach(key => {
+      if (key.includes(`-${selectedScope}-`)) {
+        delete dataFetchTriggeredRef.current[key];
+      }
+    });
+  }, [selectedScope]);
+
   // derive current scope data/loading/error and rank
   const { scopeEntries, scopeHasMore, scopeLoading, scopeError } = useMemo(() => {
-    if (["global", "school", "team"].includes(selectedScope)) {
+    if (["global", "school", "group"].includes(selectedScope)) {
       const scopeData = aggLeaderboards[selectedScope] || { entries: [], hasMore: true };
       return {
         scopeEntries: scopeData.entries || [],
@@ -486,11 +497,11 @@ export default function LeaderboardPage({ schoolId: propSchoolId, groupId: propG
       combinedScore: Number(entry.combinedScore ?? entry.score ?? 0),
       userId: entry.userId,
     };
-  }, [scopeEntries, user]);
+  }, [scopeEntries, user?.uid]);
 
   // load more (route to hook or extra)
   const handleLoadMore = useCallback(() => {
-    if (["global", "school", "team"].includes(selectedScope)) {
+    if (["global", "school", "group"].includes(selectedScope)) {
       console.debug("[LeaderboardPage] Load more via hook for", selectedScope);
       aggLoadLeaderboardPage(selectedScope, true);
     } else {

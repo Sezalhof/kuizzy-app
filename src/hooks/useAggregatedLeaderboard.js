@@ -1,5 +1,5 @@
 // src/hooks/useAggregatedLeaderboard.js
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { db } from "../firebase";
 import { getTwoMonthPeriod } from "../utils/saveTestAttempt";
 import {
@@ -16,6 +16,11 @@ const SCOPES = ["global", "school", "group", "union", "upazila", "district", "di
 const PAGE_SIZE = 20;
 const STORAGE_PREFIX = "kuizzy_leaderboard_";
 const CACHE_EXPIRATION = 1000 * 60 * 60 * 24; // 24h
+
+const FINISH_FIELD = "finishedAt";
+
+// Simplified global state - just track what's been executed
+const globalTracker = new Map();
 
 function getStorageKey(scopeKey, userId, period) {
   return `${STORAGE_PREFIX}${userId}_${scopeKey}_${period}`;
@@ -35,7 +40,6 @@ function loadCachedLeaderboard(scopeKey, userId, period) {
     const parsed = JSON.parse(json);
     if (!parsed.entries) return null;
     const age = Date.now() - (parsed.lastUpdated || 0);
-    // prefer fresh data at peak, allow stale off-peak
     if (age > CACHE_EXPIRATION && !isOffPeakUSCentral()) return null;
     return parsed;
   } catch (err) {
@@ -49,135 +53,130 @@ export function useAggregatedLeaderboard(userId, profile = null) {
   const [loadingScopes, setLoadingScopes] = useState({});
   const [errors, setErrors] = useState({});
   const [period, setPeriod] = useState(getTwoMonthPeriod());
-  const loadingMoreRef = useRef({});
-  const warnedMissingRef = useRef({}); // throttle “missing id” warnings per scope
 
-  // Build Firestore query for a scope, auto-fallback to global if id missing
+  // Refs to prevent infinite loops
+  const loadingMoreRef = useRef({});
+  const warnedMissingRef = useRef({});
+  const initializedRef = useRef(false);
+  const lastProfileRef = useRef(null);
+  const lastUserIdRef = useRef(null);
+  const lastPeriodRef = useRef(null);
+
+  // Memoize profile values to prevent unnecessary re-renders
+  const profileData = useMemo(() => ({
+    schoolId: profile?.schoolId || null,
+    groupId: profile?.groupId || null,
+    unionId: profile?.unionId || null,
+    upazilaId: profile?.upazilaId || null,
+    districtId: profile?.districtId || null,
+    divisionId: profile?.divisionId || null,
+  }), [profile?.schoolId, profile?.groupId, profile?.unionId, profile?.upazilaId, profile?.districtId, profile?.divisionId]);
+
   const buildScopeQuery = useCallback(
     (scopeKey, startAfterDoc = null) => {
-      // Always constrain to the active period to tame index sizes
       let q = query(collection(db, "scores"), where("twoMonthPeriod", "==", period));
       let usingFallback = false;
 
-      const missingOnce = (k, fieldName) => {
-        if (!warnedMissingRef.current[k]) {
-          console.warn(`[LeaderboardHook] Missing ${fieldName} for scope=${k}, using global fallback`);
-          warnedMissingRef.current[k] = true;
+      const warnOnce = (scopeKey, fieldName) => {
+        if (!warnedMissingRef.current[scopeKey]) {
+          warnedMissingRef.current[scopeKey] = true;
+          if (process.env.NODE_ENV === "development") {
+            console.warn(
+              `[LeaderboardHook] Missing ${fieldName} for scope=${scopeKey}, using global fallback`
+            );
+          }
         }
       };
 
       switch (scopeKey) {
         case "global":
-          console.log("[LeaderboardHook] Building global leaderboard query for period:", period);
           break;
 
         case "school":
-          if (profile?.schoolId) {
-            q = query(q, where("schoolId", "==", profile.schoolId));
-            console.log("[LeaderboardHook] Building school query", { schoolId: profile.schoolId, period });
+          if (profileData.schoolId) {
+            q = query(q, where("schoolId", "==", profileData.schoolId));
           } else {
-            missingOnce("school", "schoolId");
+            warnOnce("school", "schoolId");
             usingFallback = true;
           }
           break;
 
-        case "group":
-          if (profile?.groupId) {
-            q = query(q, where("groupId", "==", profile.groupId));
-            console.log("[LeaderboardHook] Building group query", { groupId: profile.groupId, period });
-          } else {
-            missingOnce("group", "groupId");
-            usingFallback = true;
-          }
+          case "group":
+            if (profileData.groupId) {
+              q = query(q, where("groupId", "==", profileData.groupId));
+            } else {
+              console.warn("[LeaderboardHook] No groupId; skipping group leaderboard");
+              return null; // Prevents fallback to global
+            }
+          
           break;
 
         case "union":
-          if (profile?.unionId) {
-            q = query(q, where("unionId", "==", profile.unionId));
-            console.log("[LeaderboardHook] Building union query", { unionId: profile.unionId, period });
+          if (profileData.unionId) {
+            q = query(q, where("unionId", "==", profileData.unionId));
           } else {
-            missingOnce("union", "unionId");
+            warnOnce("union", "unionId");
             usingFallback = true;
           }
           break;
 
         case "upazila":
-          if (profile?.upazilaId) {
-            q = query(q, where("upazilaId", "==", profile.upazilaId));
-            console.log("[LeaderboardHook] Building upazila query", { upazilaId: profile.upazilaId, period });
+          if (profileData.upazilaId) {
+            q = query(q, where("upazilaId", "==", profileData.upazilaId));
           } else {
-            missingOnce("upazila", "upazilaId");
+            warnOnce("upazila", "upazilaId");
             usingFallback = true;
           }
           break;
 
         case "district":
-          if (profile?.districtId) {
-            q = query(q, where("districtId", "==", profile.districtId));
-            console.log("[LeaderboardHook] Building district query", { districtId: profile.districtId, period });
+          if (profileData.districtId) {
+            q = query(q, where("districtId", "==", profileData.districtId));
           } else {
-            missingOnce("district", "districtId");
+            warnOnce("district", "districtId");
             usingFallback = true;
           }
           break;
-
+            
         case "division":
-          if (profile?.divisionId) {
-            q = query(q, where("divisionId", "==", profile.divisionId));
-            console.log("[LeaderboardHook] Building division query", { divisionId: profile.divisionId, period });
+          if (profileData.divisionId) {
+            q = query(q, where("divisionId", "==", profileData.divisionId));
           } else {
-            missingOnce("division", "divisionId");
+            warnOnce("division", "divisionId");
             usingFallback = true;
           }
           break;
-
+        
         default:
-          console.warn(`[LeaderboardHook] Unknown scope=${scopeKey}, falling back to global`);
+          console.warn(`[LeaderboardHook] Unknown scope=${scopeKey}, fallback to global`);
           usingFallback = true;
       }
-
-      if (usingFallback && scopeKey !== "global") {
-        // fall back to global within the same period
-        q = query(collection(db, "scores"), where("twoMonthPeriod", "==", period));
-        console.log("[LeaderboardHook] Fallback -> global query for period:", period);
-      }
-
-      // ---- ORDERING (composite-index friendly) ----
-      // We’ll use fields you actually have: combinedScore (desc), timeTaken (asc if present), finishedAt (desc).
-      // This will require composite indexes once combined with equality filters above.
-      // Example composite (global): twoMonthPeriod ASC, combinedScore DESC, timeTaken ASC, finishedAt DESC
-      q = query(
-        q,
+      
+if (usingFallback) {
+  // Do not query global if user lacks permission
+  console.warn(`[LeaderboardHook] Skipping scope=${scopeKey} due to missing profile data`);
+  return null; // early exit; loadLeaderboardPage should handle null
+}      
+      q = query(q,
         orderBy("combinedScore", "desc"),
         orderBy("timeTaken", "asc"),
-        orderBy("finishedAt", "desc"),
+        orderBy(FINISH_FIELD, "desc"),
         limit(PAGE_SIZE)
       );
 
-      if (startAfterDoc) {
-        q = query(q, startAfter(startAfterDoc));
-      }
-
-      console.log(`[LeaderboardHook] Built query for scope=${usingFallback ? "global(fallback)" : scopeKey}`, {
-        period,
-        orders: ["combinedScore DESC", "timeTaken ASC", "finishedAt DESC"],
-        pageSize: PAGE_SIZE,
-        startAfterId: startAfterDoc?.id || null,
-      });
+      if (startAfterDoc) q = query(q, startAfter(startAfterDoc));
 
       return q;
     },
-    [profile, period]
+    [period, profileData]
   );
 
-  // Batch fetch user details (avoid N+1)
   const fetchUserDetailsBatch = useCallback(async (uids) => {
     if (!uids.length) return {};
     const BATCH_SIZE = 10;
     const result = {};
     for (let i = 0; i < uids.length; i += BATCH_SIZE) {
       const batch = uids.slice(i, i + BATCH_SIZE);
-      console.log("[LeaderboardHook] Fetching user details batch:", batch);
       try {
         const q = query(collection(db, "users"), where("__name__", "in", batch));
         const snap = await getDocs(q);
@@ -185,7 +184,6 @@ export function useAggregatedLeaderboard(userId, profile = null) {
           const { username, name, email } = doc.data();
           result[doc.id] = { name: username || name || "Unknown", email: email || doc.id };
         });
-        // mark any still-missing ids
         batch.forEach((uid) => { if (!result[uid]) result[uid] = { name: "Unknown", email: uid }; });
       } catch (err) {
         console.error("[LeaderboardHook] Error fetching users batch:", batch, err);
@@ -197,122 +195,158 @@ export function useAggregatedLeaderboard(userId, profile = null) {
 
   const loadLeaderboardPage = useCallback(
     async (scopeKey, isLoadMore = false) => {
-      if (!userId) return;
-      if (loadingMoreRef.current[scopeKey]) return;
+      if (!userId || loadingMoreRef.current[scopeKey]) {
+        return;
+      }
 
-      setErrors((prev) => ({ ...prev, [scopeKey]: null }));
-      setLoadingScopes((prev) => ({ ...prev, [scopeKey]: true }));
+      // Simple rate limiting - prevent same scope from loading too frequently
+      const now = Date.now();
+      const trackingKey = `${userId}_${scopeKey}_${period}`;
+      const lastExecution = globalTracker.get(trackingKey) || 0;
+      
+      if (now - lastExecution < 1000) { // 1 second minimum between calls
+        console.debug(`[LeaderboardHook] Rate limited: ${scopeKey}`);
+        return;
+      }
+
+      globalTracker.set(trackingKey, now);
+
+      setErrors(prev => ({ ...prev, [scopeKey]: null }));
+      setLoadingScopes(prev => ({ ...prev, [scopeKey]: true }));
       loadingMoreRef.current[scopeKey] = true;
 
       try {
         const currentData = leaderboards[scopeKey] || { entries: [], lastDoc: null, hasMore: true };
-        if (!currentData.hasMore && isLoadMore) {
-          console.log("[LeaderboardHook] No more pages for", scopeKey);
-          return;
-        }
+        if (!currentData.hasMore && isLoadMore) return;
 
         const q = buildScopeQuery(scopeKey, currentData.lastDoc);
         const snap = await getDocs(q);
-        console.log(`[LeaderboardHook] ${scopeKey} snapshot size:`, snap.size);
 
-        let newEntries = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        let newEntries = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-        // hydrate display names
-        const userIdsToFetch = [...new Set(newEntries.map((e) => e.userId).filter(Boolean))];
+        const userIdsToFetch = [...new Set(newEntries.map(e => e.userId).filter(Boolean))];
         const userDetails = await fetchUserDetailsBatch(userIdsToFetch);
-        newEntries = newEntries.map((e) => ({
+        newEntries = newEntries.map(e => ({
           ...e,
           name: e.name || userDetails[e.userId]?.name || "Unknown",
           email: e.email || userDetails[e.userId]?.email || e.userId,
         }));
 
         const hasMore = snap.docs.length === PAGE_SIZE;
-        const updatedEntries = isLoadMore ? [...(currentData.entries || []), ...newEntries] : newEntries;
+        const updatedEntries = isLoadMore ? [...currentData.entries, ...newEntries] : newEntries;
 
-        // cache without lastDoc (can’t serialize a doc snapshot)
         try {
-          localStorage.setItem(
-            getStorageKey(scopeKey, userId, period),
-            JSON.stringify({
-              entries: updatedEntries,
-              lastDocIndex: snap.docs.length ? snap.docs.length - 1 : null,
-              hasMore,
-              lastUpdated: Date.now(),
-            })
+          localStorage.setItem(getStorageKey(scopeKey, userId, period),
+            JSON.stringify({ entries: updatedEntries, lastDocIndex: snap.docs.length ? snap.docs.length - 1 : null, hasMore, lastUpdated: Date.now() })
           );
-          console.log(`[LeaderboardHook] Cached ${scopeKey} leaderboard (entries=${updatedEntries.length})`);
-        } catch (err) {
-          console.warn("[LeaderboardHook] Failed to cache leaderboard", err);
+        } catch (err) { 
+          console.warn("[LeaderboardHook] Failed to cache leaderboard", err); 
         }
 
-        setLeaderboards((prev) => ({
-          ...prev,
-          [scopeKey]: {
-            entries: updatedEntries,
-            lastDoc: snap.docs.length ? snap.docs[snap.docs.length - 1] : currentData.lastDoc,
-            hasMore,
-          },
-        }));
+        const newLeaderboardData = { 
+          entries: updatedEntries, 
+          lastDoc: snap.docs.length ? snap.docs[snap.docs.length - 1] : currentData.lastDoc, 
+          hasMore 
+        };
+        
+        setLeaderboards(prev => ({ ...prev, [scopeKey]: newLeaderboardData }));
+        
       } catch (err) {
-        // Surface composite-index hint if present
+        console.error(`[LeaderboardHook] Error loading ${scopeKey}:`, err);
         const msg = String(err?.message || err);
-        const idxUrl = msg.includes("create_composite=")
-          ? msg.substring(msg.indexOf("https://"), msg.length)
-          : null;
-        console.error(`[LeaderboardHook] Error loading ${scopeKey} leaderboard:`, err);
-        if (idxUrl) {
-          console.warn(`[LeaderboardHook] Firestore index required for ${scopeKey}. Create it from:`, idxUrl);
-        }
-        setErrors((prev) => ({
-          ...prev,
-          [scopeKey]: idxUrl
-            ? "Firestore composite index required. See console for the link."
-            : "Unable to load leaderboard. Try again.",
-        }));
+        const idxUrl = msg.includes("create_composite=") ? msg.substring(msg.indexOf("https://")) : null;
+        if (idxUrl) console.warn(`[LeaderboardHook] Firestore index required for ${scopeKey}. Create it from:`, idxUrl);
+        setErrors(prev => ({ ...prev, [scopeKey]: idxUrl ? "Firestore composite index required. See console." : "Unable to load leaderboard. Try again." }));
       } finally {
-        setLoadingScopes((prev) => ({ ...prev, [scopeKey]: false }));
+        setLoadingScopes(prev => ({ ...prev, [scopeKey]: false }));
         loadingMoreRef.current[scopeKey] = false;
       }
     },
-    [userId, leaderboards, period, buildScopeQuery, fetchUserDetailsBatch]
+    [userId, period, leaderboards, buildScopeQuery, fetchUserDetailsBatch]
   );
 
   const refreshLeaderboard = useCallback(() => {
-    console.log("[LeaderboardHook] Refreshing all scopes...");
-    SCOPES.forEach((scopeKey) => loadLeaderboardPage(scopeKey, false));
-  }, [loadLeaderboardPage]);
+    // Clear cache and reload all scopes
+    globalTracker.clear();
+    initializedRef.current = false;
+    SCOPES.forEach(scopeKey => {
+      if (localStorage.getItem(getStorageKey(scopeKey, userId, period))) {
+        localStorage.removeItem(getStorageKey(scopeKey, userId, period));
+      }
+      loadLeaderboardPage(scopeKey, false);
+    });
+  }, [userId, period, loadLeaderboardPage]);
 
-  // Load cached leaderboards
+  // Load cached data on mount or when key params change
   useEffect(() => {
     if (!userId) return;
+    
+    // Check if we need to reset due to parameter changes
+    const shouldReset = (
+      lastUserIdRef.current !== userId ||
+      lastPeriodRef.current !== period ||
+      JSON.stringify(lastProfileRef.current) !== JSON.stringify(profileData)
+    );
+
+    if (shouldReset) {
+      lastUserIdRef.current = userId;
+      lastPeriodRef.current = period;
+      lastProfileRef.current = profileData;
+      initializedRef.current = false;
+    }
+
+    // Load cached data
     const cachedData = {};
-    SCOPES.forEach((scopeKey) => {
+    SCOPES.forEach(scopeKey => {
       const cache = loadCachedLeaderboard(scopeKey, userId, period);
       if (cache && cache.entries.length) {
-        cachedData[scopeKey] = { entries: cache.entries, lastDoc: null, hasMore: cache.hasMore ?? true };
-        console.log(`[LeaderboardHook] Loaded cached data for ${scopeKey}`, {
-          count: cache.entries.length,
-          hasMore: cache.hasMore,
-        });
+        cachedData[scopeKey] = { 
+          entries: cache.entries, 
+          lastDoc: null, 
+          hasMore: cache.hasMore ?? true 
+        };
       }
     });
-    setLeaderboards(cachedData);
-  }, [userId, period]);
+    
+    if (Object.keys(cachedData).length > 0) {
+      setLeaderboards(cachedData);
+    }
+  }, [userId, period, profileData]);
 
-  // Initial load for all scopes (will fallback where IDs are missing)
+  // Initialize leaderboards - only run once per parameter set
   useEffect(() => {
-    console.log("[LeaderboardHook] Initial load for all scopes, period:", period);
-    SCOPES.forEach((scopeKey) => loadLeaderboardPage(scopeKey));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period]); // re-run when period changes
+    if (!userId || initializedRef.current) return;
 
-  return {
-    leaderboards,
-    loadingScopes,
-    errors,
-    period,
-    setPeriod,
-    loadLeaderboardPage,
-    refreshLeaderboard,
+    initializedRef.current = true;
+    
+    // Load scopes that have the required data
+    SCOPES.forEach((scopeKey) => {
+      const shouldLoad = 
+        scopeKey === "global" ||
+        (scopeKey === "school" && profileData.schoolId) ||
+        (scopeKey === "group" && profileData.groupId) ||
+        (scopeKey === "union" && profileData.unionId) ||
+        (scopeKey === "upazila" && profileData.upazilaId) ||
+        (scopeKey === "district" && profileData.districtId) ||
+        (scopeKey === "division" && profileData.divisionId);
+
+      if (shouldLoad) {
+        // Small delay to prevent all requests firing at once
+        setTimeout(() => {
+          loadLeaderboardPage(scopeKey, false);
+        }, Math.random() * 100);
+      }
+    });
+  }, [userId, period, profileData, loadLeaderboardPage]);
+
+  return { 
+    leaderboards, 
+    loadingScopes, 
+    errors, 
+    period, 
+    setPeriod, 
+    loadLeaderboardPage, 
+    refreshLeaderboard 
   };
 }
+

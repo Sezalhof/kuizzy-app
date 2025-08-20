@@ -1,5 +1,4 @@
-// src/components/tests/TestPlayer.jsx
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { saveTestAttempt } from "../../utils/saveTestAttempt";
 
 export default function TestPlayer({ test, onComplete, userId, profile }) {
@@ -11,6 +10,10 @@ export default function TestPlayer({ test, onComplete, userId, profile }) {
   const [savingError, setSavingError] = useState(null);
   const [startedAt, setStartedAt] = useState(null);
   const [todayCombinedScore, setTodayCombinedScore] = useState(null);
+
+  useEffect(() => {
+    console.log("[TestPlayer] Component mounted. Profile:", profile, "UserId:", userId);
+  }, [profile, userId]);
 
   if (!test)
     return <div className="p-4 text-red-600">Test not found in ExamTable.</div>;
@@ -29,7 +32,7 @@ export default function TestPlayer({ test, onComplete, userId, profile }) {
     setStartedAt(new Date());
     setTodayCombinedScore(null);
 
-    console.log("[TestPlayer] Test started:", test.id);
+    console.log("[TestPlayer] Test started:", test.id, "Time:", new Date());
   };
 
   const handleAnswer = (optionIndex) => {
@@ -48,11 +51,11 @@ export default function TestPlayer({ test, onComplete, userId, profile }) {
     setFinished(true);
     setPlaying(false);
 
-    console.log("[TestPlayer] handleFinish");
+    console.log("[TestPlayer] handleFinish triggered");
     console.log("[TestPlayer] User profile:", profile);
     console.log("[TestPlayer] UserId prop:", userId);
-    console.log("[TestPlayer] Test:", test);
-    console.log("[TestPlayer] Score:", score, "Total Questions:", totalQuestions);
+    console.log("[TestPlayer] Test object:", test);
+    console.log("[TestPlayer] Current Score:", score, "of", totalQuestions);
     console.log("[TestPlayer] User answers:", userAnswers);
 
     try {
@@ -61,13 +64,13 @@ export default function TestPlayer({ test, onComplete, userId, profile }) {
         0,
         Math.round((finishedAt.getTime() - (startedAt ?? finishedAt).getTime()) / 1000)
       );
-      const remainingTime = Math.max(0, (test.duration ?? 0) - elapsedSec);
+      const remainingTime = Math.max(0, (test.duration ?? 900) - elapsedSec);
       const combinedScore = Number(score || 0) + remainingTime / 60;
 
       setTodayCombinedScore(combinedScore.toFixed(2));
 
       const payload = {
-        userId: profile?.uid ?? userId,
+        userId: userId,
         displayName: profile?.displayName ?? "Unknown",
         testId: test.id,
         score: score ?? 0,
@@ -76,23 +79,24 @@ export default function TestPlayer({ test, onComplete, userId, profile }) {
         startedAt: startedAt ?? new Date(),
         finishedAt,
         testDurationSec: test.duration ?? 900,
-        groupId: profile?.groupId ?? null,
+        groupId: null, // removed for rules safety
+        createdAt: new Date(),
       };
 
-      console.log("[TestPlayer] Payload to saveTestAttempt:", payload);
+      console.log("[TestPlayer] Payload prepared for saveTestAttempt:", payload);
 
       if (!payload.userId) {
-        console.error("[TestPlayer] Missing userId! Cannot save attempt.", payload);
+        console.error("[TestPlayer] Missing userId! Attempt not saved.", payload);
         setSavingError("Missing userId. Cannot save test attempt.");
         return;
       }
 
-      await saveTestAttempt(payload);
+      await saveTestAttempt(payload); // Firestore write
       setSavingError(null);
       console.log("[TestPlayer] Test attempt saved successfully.");
     } catch (err) {
       setSavingError(err.message);
-      console.error("[TestPlayer] Failed to save test attempt:", err);
+      console.error("[TestPlayer] Failed to save test attempt:", err.code, err.message);
     }
 
     onComplete?.(score, totalQuestions, userAnswers, startedAt, new Date());

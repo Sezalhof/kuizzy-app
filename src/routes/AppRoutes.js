@@ -18,7 +18,6 @@ import SeedDataPage from "../pages/admin/SeedDataPage";
 import ApiTestPage from '../pages/ApiTestPage';
 
 
-
 // Auth Components
 import RequireAuth from "../components/auth/RequireAuth";
 import RequireProfile from "../components/auth/RequireProfile";
@@ -150,10 +149,27 @@ export default function AppRoutes({
     userRole,
   ]);
 
-  // Mount/unmount effects
-  useEffect(() => {
-    logMountInfo();
-    
+// Mount/unmount effects (run only once)
+   useEffect(() => {
+    if (process.env.NODE_ENV === "development") {
+      console.groupCollapsed("[AppRoutes] ✅ Mounted");
+      console.log({
+        user: !!user,
+        profile: !!profile,
+        profileLoading,
+        profileError,
+        leaderboardData: !!leaderboardData,
+        quizCompleted,
+        score,
+        timeTaken,
+        fullyReady,
+        authLoading,
+        needsEnrollment,
+        userRole,
+      });
+      console.groupEnd();
+    }
+
     if (typeof onMounted === "function") {
       if (process.env.NODE_ENV === "development") {
         console.log("[AppRoutes] Calling onMounted callback");
@@ -166,7 +182,8 @@ export default function AppRoutes({
         console.log("[AppRoutes] 🔁 Unmounted");
       }
     };
-  }, [onMounted, logMountInfo]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // <— empty array ensures this runs only once
 
   // Helper components
   const ProtectedRoute = ({ children }) => (
@@ -290,7 +307,6 @@ export default function AppRoutes({
   />
 </Route>
 
-
       <Route
         path={ROUTES.PROFILE}
         element={
@@ -331,7 +347,6 @@ export default function AppRoutes({
   }
 />
 
-
       <Route
         path={ROUTES.LEADERBOARD}
         element={
@@ -365,7 +380,6 @@ export default function AppRoutes({
         }
       />
 
-
       <Route
         path={ROUTES.GROUP_MEMBERS}
         element={
@@ -386,9 +400,9 @@ export default function AppRoutes({
 <Route path="/api-test" element={<ApiTestPage />} />
 
 
-
       {/* Fallback Route */}
       <Route path="*" element={<Navigate to={ROUTES.HOME} replace />} />
     </Routes>
   );
 }
+

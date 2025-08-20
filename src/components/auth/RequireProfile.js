@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React from "react";
 import { Navigate, useLocation } from "react-router-dom";
 
 export default function RequireProfile({
@@ -11,17 +11,6 @@ export default function RequireProfile({
 }) {
   const location = useLocation();
 
-  // 🐞 Debug logs
-  useEffect(() => {
-    console.groupCollapsed("[RequireProfile] 🔍 State Snapshot");
-    console.log("Auth user:", user?.uid || "null");
-    console.log("Auth loading:", authLoading);
-    console.log("Profile loading:", profileLoading);
-    console.log("Profile object:", profile);
-    console.log("Profile error:", profileError);
-    console.groupEnd();
-  }, [user, authLoading, profileLoading, profile, profileError]);
-
   // ⏳ Wait for loading
   if (authLoading || profileLoading) {
     return (
@@ -33,7 +22,6 @@ export default function RequireProfile({
 
   // 🔐 Not logged in
   if (!user) {
-    console.warn("[RequireProfile] 🚫 Redirecting: user not signed in");
     return <Navigate to="/" state={{ from: location }} replace />;
   }
 
@@ -59,20 +47,14 @@ export default function RequireProfile({
 
   // Allow /enroll route to render always (prevent redirect loop)
   if (location.pathname === "/enroll") {
-    console.log("[RequireProfile] ℹ️ On /enroll route - allowing access");
     return <>{children}</>;
   }
 
   // Redirect to enroll if profile incomplete or error (except on /enroll)
   if (!isComplete || profileError) {
-    console.warn("[RequireProfile] ⚠️ Redirecting: profile incomplete or error", {
-      isComplete,
-      profileError,
-    });
     return <Navigate to="/enroll" state={{ from: location }} replace />;
   }
 
   // ✅ Success
-  console.log("[RequireProfile] ✅ Profile complete — rendering children");
   return <>{children}</>;
 }
