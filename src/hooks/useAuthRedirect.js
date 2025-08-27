@@ -9,24 +9,29 @@ export function useAuthRedirect(user, loading) {
 
   useEffect(() => {
     const checkProfile = async () => {
-      if (loading || !user) return;
+      if (loading || !user?.uid) return;
 
-      const userRef = doc(db, "users", user.uid);
-      const docSnap = await getDoc(userRef);
+      try {
+        const userRef = doc(db, "users", user.uid);
+        const docSnap = await getDoc(userRef);
 
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        const isIncomplete =
-          !data.name || !data.phone || !data.grade || !data.school;
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const isIncomplete =
+            !data.name || !data.phone || !data.grade || !data.school;
 
-        if (isIncomplete && location.pathname !== "/enroll") {
-          navigate("/enroll");
+          if (isIncomplete && location.pathname !== "/enroll") {
+            navigate("/enroll");
+          }
+        } else {
+          if (location.pathname !== "/enroll") {
+            navigate("/enroll");
+          }
         }
-      } else {
-        // No document at all — redirect to enroll
-        if (location.pathname !== "/enroll") {
-          navigate("/enroll");
-        }
+      } catch (err) {
+        console.warn("[useAuthRedirect] Firestore read failed:", err);
+        // Redirect to enroll only if current path is not /enroll
+        if (location.pathname !== "/enroll") navigate("/enroll");
       }
     };
 

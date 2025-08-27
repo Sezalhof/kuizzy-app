@@ -1,14 +1,8 @@
-import {
-  doc,
-  setDoc,
-  collection,
-  getDocs,
-  query,
-  orderBy,
-  limit,
-  addDoc,
-} from "firebase/firestore";
+// src/utils/firestoreUtils.js
+import { doc, setDoc, collection, getDocs, query, orderBy, limit, addDoc } from "firebase/firestore";
 import { db } from "../firebase";
+import { getTwoMonthPeriod } from '../utils/saveAttemptAndLeaderboard';
+
 
 // 🔹 Updates or creates a user profile
 export async function updateUserProfile(uid, profileData) {
@@ -36,14 +30,23 @@ export async function fetchTopScores(limitCount = 10) {
   }));
 }
 
-// 🔹 Save a quiz score
-export async function saveQuizScore(uid, email, score, timeTaken) {
+// 🔹 Save a quiz score (rules-compliant, group-ready)
+export async function saveQuizScore(uid, score, timeTaken, groupId = null) {
+  // Replace with actual currentUser.uid in frontend
+  const currentUser = uid; // Placeholder for auth check
+  if (uid !== currentUser) {
+    throw new Error("Cannot save score for another user");
+  }
+
   try {
+    const twoMonthPeriod = getTwoMonthPeriod();
+
     await addDoc(collection(db, "scores"), {
       uid,
-      email,
       score,
       timeTaken,
+      twoMonthPeriod,
+      groupId: groupId || null,
       timestamp: Date.now(),
     });
   } catch (error) {
@@ -52,41 +55,46 @@ export async function saveQuizScore(uid, email, score, timeTaken) {
   }
 }
 
+// 🔹 In-memory cache for schools
+let schoolsCache = {
+  data: null,
+  timestamp: null,
+  isLoading: false,
+};
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
 // 🔹 Get all schools grouped by division > district > upazila > union_or_pouroshava
-export async function getAllSchoolsGrouped() {
+export async function getAllSchoolsGrouped({ forceRefresh = false } = {}) {
+  if (!forceRefresh && schoolsCache.data && schoolsCache.timestamp) {
+    const age = Date.now() - schoolsCache.timestamp;
+    if (age < CACHE_DURATION) return schoolsCache.data;
+  }
+
+  if (schoolsCache.isLoading) {
+    while (schoolsCache.isLoading) await new Promise(r => setTimeout(r, 100));
+    return schoolsCache.data;
+  }
+
+  schoolsCache.isLoading = true;
   try {
     const snapshot = await getDocs(collection(db, "schools"));
     const grouped = {};
 
     snapshot.forEach((doc) => {
       const school = doc.data();
-      const {
-        division,
-        district,
-        upazila,
-        union_or_pouroshava,
-        name,
-      } = school;
-
-      if (
-        !division ||
-        !district ||
-        !upazila ||
-        !union_or_pouroshava ||
-        !name
-      ) return;
+      const { division, district, upazila, union_or_pouroshava, name } = school;
+      if (!division || !district || !upazila || !union_or_pouroshava || !name) return;
 
       if (!grouped[division]) grouped[division] = {};
       if (!grouped[division][district]) grouped[division][district] = {};
-      if (!grouped[division][district][upazila])
-        grouped[division][district][upazila] = {};
+      if (!grouped[division][district][upazila]) grouped[division][district][upazila] = {};
       if (!grouped[division][district][upazila][union_or_pouroshava])
         grouped[division][district][upazila][union_or_pouroshava] = [];
 
       grouped[division][district][upazila][union_or_pouroshava].push(name);
     });
 
-    // Optional: sort schools alphabetically
+    // Sort schools alphabetically
     Object.keys(grouped).forEach((division) => {
       Object.keys(grouped[division]).forEach((district) => {
         Object.keys(grouped[division][district]).forEach((upazila) => {
@@ -97,11 +105,21 @@ export async function getAllSchoolsGrouped() {
       });
     });
 
+    schoolsCache.data = grouped;
+    schoolsCache.timestamp = Date.now();
+
     return grouped;
   } catch (error) {
     console.error("❌ Error grouping schools:", error);
     throw error;
+  } finally {
+    schoolsCache.isLoading = false;
   }
+}
+
+// 🔹 Clear schools cache
+export function clearSchoolsCache() {
+  schoolsCache = { data: null, timestamp: null, isLoading: false };
 }
 
 // 🔹 Get all unions grouped by division > district > upazila
@@ -116,15 +134,13 @@ export async function getAllUnionsGrouped() {
 
       if (!grouped[division]) grouped[division] = {};
       if (!grouped[division][district]) grouped[division][district] = {};
-      if (!grouped[division][district][upazila])
-        grouped[division][district][upazila] = [];
+      if (!grouped[division][district][upazila]) grouped[division][district][upazila] = [];
 
       if (!grouped[division][district][upazila].includes(union)) {
         grouped[division][district][upazila].push(union);
       }
     });
 
-    // Optional: sort for UI friendliness
     Object.keys(grouped).forEach((div) => {
       Object.keys(grouped[div]).forEach((dist) => {
         Object.keys(grouped[div][dist]).forEach((upa) => {

@@ -1,116 +1,108 @@
-//src/pages/GroupLeaderboardPage.js
-import React, { useEffect, useState, useCallback, useRef } from "react";
+// src/pages/GroupLeaderboardPage.js
+import React, { useEffect, useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
-import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
-import GroupLeaderboard from "../components/GroupLeaderboard";
+import { collection, getDocs, query } from "firebase/firestore";
+import GroupLeaderboard from "../components/leaderboard/GroupLeaderboard";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
+import useAuth from "../hooks/useAuth";
+import { useUserProfile } from "../hooks/useUserProfile";
 
-const STORAGE_PREFIX = "kuizzy_group_leaderboard_";
-const CACHE_EXPIRATION = 1000 * 60 * 60 * 24; // 24 hours
-
-function getStorageKey(groupId) {
-  return `${STORAGE_PREFIX}${groupId}`;
-}
+// ------------------ Cache Helper ------------------
+const STORAGE_PREFIX = "kuizzy_leaderboard_";
+const CACHE_EXPIRATION = 1000 * 60 * 60 * 24; // 24h
 
 function isOffPeakUSCentral() {
   const now = new Date();
-  // UTC hour minus 5 for CST (no DST adjustment)
   const utcHour = now.getUTCHours();
   const centralHour = (utcHour + 24 - 5) % 24;
   return centralHour >= 0 && centralHour < 6;
 }
 
-function loadCachedGroupLeaderboard(groupId) {
+function loadCachedLeaderboard(scopeKey, userId, period, groupId = null) {
   try {
-    const json = localStorage.getItem(getStorageKey(groupId));
+    const key =
+      scopeKey === "group"
+        ? `${STORAGE_PREFIX}${userId}_group_${groupId || "self"}_${period}`
+        : `${STORAGE_PREFIX}${userId}_${scopeKey}_${period}`;
+    const json = localStorage.getItem(key);
     if (!json) return null;
     const parsed = JSON.parse(json);
-    if (!parsed.data) return null;
-
-    const now = Date.now();
-    const age = now - (parsed.lastUpdated || 0);
-
-    if (age > CACHE_EXPIRATION) {
-      // Cache expired
-      if (isOffPeakUSCentral()) {
-        // Allowed to refresh now - treat as no cache to force reload
-        return null;
-      } else {
-        // Use stale cache but no refresh
-        return parsed;
-      }
-    }
+    if (!parsed.entries) return null;
+    const age = Date.now() - (parsed.lastUpdated || 0);
+    if (age > CACHE_EXPIRATION && !isOffPeakUSCentral()) return null;
     return parsed;
   } catch (e) {
-    console.warn("[GroupLeaderboardPage] Failed to read cache", e);
+    console.warn("[GroupLeaderboardPage] Cache parse failed", e);
     return null;
   }
 }
 
+// ------------------ Main Component ------------------
 export default function GroupLeaderboardPage() {
   const { groupId } = useParams();
-  const [data, setData] = useState([]);
+  const { user, loading: authLoading } = useAuth();
+  const { profile, loading: profileLoading } = useUserProfile(user?.uid ?? null);
+
+  const [validGroupId, setValidGroupId] = useState(groupId);
+  const [leaderboardData, setLeaderboardData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const loadingRef = useRef(false);
+  const period = useMemo(() => {
+    const now = new Date();
+    const month = now.getMonth();
+    const year = now.getFullYear();
+    return month % 2 === 0 ? `${month}-${month + 1}-${year}` : `${month + 1}-${month + 2}-${year}`;
+  }, []);
 
-  const fetchScores = useCallback(async () => {
-    if (!groupId || loadingRef.current) return;
-    loadingRef.current = true;
-    setLoading(true);
-
-    try {
-      const q = query(collection(db, "scores"), where("groupId", "==", groupId));
-      const snapshot = await getDocs(q);
-      const results = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      setData(results);
-
-      // Save cache with timestamp
-      try {
-        localStorage.setItem(
-          getStorageKey(groupId),
-          JSON.stringify({ data: results, lastUpdated: Date.now() })
-        );
-      } catch (e) {
-        console.warn("[GroupLeaderboardPage] Failed to write cache", e);
-      }
-    } catch (err) {
-      setData([]);
-      console.error("[GroupLeaderboardPage] Failed to fetch scores", err);
-    } finally {
-      setLoading(false);
-      loadingRef.current = false;
-    }
+  useEffect(() => {
+    if (!groupId) setValidGroupId(null);
+    else setValidGroupId(groupId);
   }, [groupId]);
 
-  // Load cached data on mount or groupId change
+  // Load leaderboard (cached first)
   useEffect(() => {
-    if (!groupId) return;
+    if (!user || !validGroupId) {
+      setLoading(false);
+      return;
+    }
 
-    const cached = loadCachedGroupLeaderboard(groupId);
-    if (cached && cached.data?.length) {
-      setData(cached.data);
+    setLoading(true);
+    setError("");
 
-      // If cache expired and we are off-peak, refresh from server
-      if (
-        Date.now() - (cached.lastUpdated || 0) > CACHE_EXPIRATION &&
-        isOffPeakUSCentral()
-      ) {
-        fetchScores();
-      } else {
+    const cached = loadCachedLeaderboard("group", user.uid, period, validGroupId);
+    if (cached) {
+      setLeaderboardData(cached.entries);
+      setLoading(false);
+      return;
+    }
+
+    (async () => {
+      try {
+        const q = query(collection(db, "group_leaderboards", validGroupId, "members"));
+        const snapshot = await getDocs(q);
+        const entries = snapshot.docs.map((doc) => ({ uid: doc.id, ...doc.data() }));
+        setLeaderboardData(entries);
+
+        // Cache it
+        const key = `${STORAGE_PREFIX}${user.uid}_group_${validGroupId}_${period}`;
+        localStorage.setItem(
+          key,
+          JSON.stringify({ entries, lastUpdated: Date.now() })
+        );
+      } catch (err) {
+        console.error("[GroupLeaderboardPage] Fetch error:", err);
+        setError("❌ Failed to load group leaderboard.");
+      } finally {
         setLoading(false);
       }
-    } else {
-      // No valid cache, fetch immediately
-      fetchScores();
-    }
-  }, [groupId, fetchScores]);
+    })();
+  }, [user, validGroupId, period]);
 
-  if (!groupId) {
+  if (authLoading || profileLoading || loading) return <LoadingSpinner />;
+
+  if (!validGroupId) {
     return (
       <div className="p-6 max-w-xl mx-auto text-center text-red-600">
         Invalid group ID. Please go back to{" "}
@@ -122,12 +114,27 @@ export default function GroupLeaderboardPage() {
     );
   }
 
+  if (!user || !profile) {
+    return (
+      <div className="p-6 text-center text-red-600">
+        Missing profile. Please enroll or refresh.
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <h1 className="text-3xl font-bold text-center text-blue-700 mb-6">
         🏆 Group Leaderboard
       </h1>
-      {loading ? <LoadingSpinner /> : <GroupLeaderboard groupId={groupId} data={data} />}
+
+      {error && <div className="text-red-600 text-center mb-4">{error}</div>}
+
+      {leaderboardData ? (
+        <GroupLeaderboard groupId={validGroupId} initialData={leaderboardData} />
+      ) : (
+        <p className="text-center text-gray-500">No leaderboard data available.</p>
+      )}
     </div>
   );
 }

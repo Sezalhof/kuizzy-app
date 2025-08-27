@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
 
-// 🔄 In-memory cache
+// In-memory cache
 const profileCacheByUid = new Map();
 const LOCAL_STORAGE_KEY_PREFIX = "userProfile_";
 
@@ -25,7 +25,7 @@ export function useUserProfile(uid) {
     return !data || Object.keys(data).length === 0 || !data.role;
   };
 
-  // 🆕 Load from in-memory cache or localStorage instantly
+  // Load from cache / localStorage instantly
   useEffect(() => {
     if (!uid) return;
 
@@ -46,7 +46,7 @@ export function useUserProfile(uid) {
         setLoading(false);
         setError(null);
       } catch {
-        // Ignore parse errors
+        // ignore parse errors
       }
     }
   }, [uid]);
@@ -55,18 +55,15 @@ export function useUserProfile(uid) {
     if (!rawProfile || !uid) return null;
 
     const cached = profileCacheByUid.get(uid);
-    if (cached && cached._stable) {
-      return cached;
-    }
+    if (cached && cached._stable) return cached;
 
     const stableProfile = {
       ...rawProfile,
       createdAt: rawProfile.createdAt ?? null,
-      avatar: rawProfile.avatar ?? "/default-avatar.png", // Fallback avatar
+      avatar: rawProfile.avatar ?? "/default-avatar.png",
       _stable: true,
     };
 
-    // Cache in memory + localStorage
     profileCacheByUid.set(uid, stableProfile);
     localStorage.setItem(
       `${LOCAL_STORAGE_KEY_PREFIX}${uid}`,
@@ -78,14 +75,15 @@ export function useUserProfile(uid) {
 
   useEffect(() => {
     let mounted = true;
-
-    if (!uid || typeof uid !== "string") {
-      cleanup();
-      return;
-    }
+    if (!uid || typeof uid !== "string") return cleanup();
 
     const cached = profileCacheByUid.get(uid);
-    if (uid === previousUid.current && retryCount === 0 && cached && cached._stable) {
+    if (
+      uid === previousUid.current &&
+      retryCount === 0 &&
+      cached &&
+      cached._stable
+    ) {
       setRawProfile(cached);
       setLoading(false);
       setError(null);
@@ -109,15 +107,12 @@ export function useUserProfile(uid) {
         if (
           lastSnapshotPendingWrites.current === pendingWrites &&
           rawProfile !== null
-        ) {
-          return;
-        }
+        ) return;
 
         lastSnapshotPendingWrites.current = pendingWrites;
 
         if (docSnap.exists()) {
           const data = docSnap.data();
-
           if (isProfileIncomplete(data)) {
             setRawProfile(null);
             setError("Profile incomplete");
@@ -125,16 +120,14 @@ export function useUserProfile(uid) {
             return;
           }
 
-          const shouldUpdate =
-            rawProfile === null || profileDataChanged(data, rawProfile);
+          const newProfile = {
+            ...data,
+            createdAt: data.createdAt ?? null,
+            avatar: data.avatar ?? "/default-avatar.png",
+            _stable: true,
+          };
 
-          if (shouldUpdate) {
-            const newProfile = {
-              ...data,
-              createdAt: data.createdAt ?? null,
-              avatar: data.avatar ?? "/default-avatar.png",
-              _stable: true,
-            };
+          if (!rawProfile || profileDataChanged(data, rawProfile)) {
             setRawProfile(newProfile);
             profileCacheByUid.set(uid, newProfile);
             localStorage.setItem(
@@ -147,7 +140,7 @@ export function useUserProfile(uid) {
           setLoading(false);
         } else {
           setRawProfile(null);
-          setError("Profile does not exist.");
+          setError("Profile not found");
           setLoading(false);
         }
       },
@@ -155,7 +148,6 @@ export function useUserProfile(uid) {
         if (!mounted) return;
         setError("Failed to fetch profile.");
         setLoading(false);
-
         if (retryCount < 3) {
           const delay = 1000 * (retryCount + 1);
           retryTimer.current = setTimeout(() => {
@@ -183,7 +175,9 @@ export function useUserProfile(uid) {
     };
   }, [uid, retryCount, profileDataChanged, rawProfile]);
 
-  return useMemo(() => {
-    return { profile, loading, error, hasProfile: !!profile };
-  }, [profile, loading, error]);
+  return useMemo(() => ({ profile, loading, error, hasProfile: !!profile }), [
+    profile,
+    loading,
+    error,
+  ]);
 }

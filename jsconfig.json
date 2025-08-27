@@ -9,5 +9,5 @@
       "@utils/*": ["utils/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "functions/utils/normalizeId.js", "functions/src/aggregateLeaderboard.js", "functions/mockRoutes.js"]
 }

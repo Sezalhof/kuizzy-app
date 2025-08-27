@@ -1,3 +1,4 @@
+// src/components/GroupLeaderboard.js
 import React, { useEffect, useState } from "react";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
@@ -28,7 +29,6 @@ export default function GroupLeaderboard({ groupId, data }) {
           const uid = entry.userId;
           if (!uid) return;
 
-          // If entry has username, use it directly, no need to fetch
           if (entry.username) {
             newDetails[uid] = {
               name: entry.username,
@@ -37,17 +37,20 @@ export default function GroupLeaderboard({ groupId, data }) {
             return;
           }
 
-          // Skip if already cached
           if (userDetails[uid] || newDetails[uid]) return;
 
           try {
             const docRef = doc(db, "users", uid);
             const snap = await getDoc(docRef);
             if (snap.exists()) {
-              const { username, name, email } = snap.data();
+              const { username, name, email, schoolId, unionId } = snap.data();
+
+              // Optional: filter users by same schoolId or unionId if needed
               newDetails[uid] = {
                 name: username || name || "Unknown",
                 email: email || uid,
+                schoolId,
+                unionId,
               };
             } else {
               newDetails[uid] = { name: "Unknown", email: uid };
@@ -69,50 +72,71 @@ export default function GroupLeaderboard({ groupId, data }) {
     return <p className="text-center text-gray-500 mt-4">No leaderboard data yet.</p>;
   }
 
+  // Sort top 10 by score descending, then time ascending, then millis (if available)
   const sorted = [...groupScores]
     .map((entry) => ({
       ...entry,
       timeTaken: entry.timeTaken ?? entry.time ?? 9999,
+      timeMillis: entry.timeMillis ?? 0,
     }))
-    .sort((a, b) => b.score - a.score || a.timeTaken - b.timeTaken)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (a.timeTaken !== b.timeTaken) return a.timeTaken - b.timeTaken;
+      return a.timeMillis - b.timeMillis;
+    })
     .slice(0, 10);
 
   return (
     <div className="mt-6 max-w-2xl mx-auto p-4">
-      <h2 className="text-xl font-bold text-center text-blue-700 mb-4">
+      <h2 className="text-2xl font-bold text-center text-blue-700 mb-4">
         🏆 Group Leaderboard
       </h2>
-      <table className="min-w-full divide-y divide-gray-300 shadow rounded-lg overflow-hidden">
-        <thead className="bg-gray-100">
-          <tr>
-            <th className="px-4 py-2">Rank</th>
-            <th className="px-4 py-2 text-left">Name</th>
-            <th className="px-4 py-2">Score</th>
-            <th className="px-4 py-2">Time</th>
-          </tr>
-        </thead>
-        <tbody className="bg-white divide-y divide-gray-200">
-          {sorted.map((entry, index) => {
-            const userInfo = userDetails[entry.userId] || {
-              name: entry.username || "Loading...",
-              email: entry.email || entry.userId,
-            };
-            const isCurrent = user?.uid === entry.userId;
+      <div className="overflow-hidden shadow ring-1 ring-black ring-opacity-5 rounded-lg">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Rank
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Name
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Score
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Time
+              </th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {sorted.map((entry, index) => {
+              const userInfo = userDetails[entry.userId] || {
+                name: entry.username || "Loading...",
+                email: entry.email || entry.userId,
+              };
+              const isCurrent = user?.uid === entry.userId;
 
-            return (
-              <tr
-                key={entry.id || index}
-                className={isCurrent ? "bg-blue-50 font-semibold" : ""}
-              >
-                <td className="px-4 py-2 text-center">{index + 1}</td>
-                <td className="px-4 py-2">{userInfo.name}</td>
-                <td className="px-4 py-2 text-center">{entry.score}</td>
-                <td className="px-4 py-2 text-center">{entry.timeTaken}s</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+              return (
+                <tr
+                  key={entry.id || index}
+                  className={isCurrent ? "bg-blue-50 font-semibold" : ""}
+                >
+                  <td className="px-6 py-4 whitespace-nowrap text-center">{index + 1}</td>
+                  <td className="px-6 py-4 whitespace-nowrap">{userInfo.name}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-center font-semibold text-green-700">
+                    {entry.score} pts
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-center">
+                    {entry.timeTaken}s
+                    {entry.timeMillis ? `.${entry.timeMillis.toString().padStart(3, "0")}` : ""}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

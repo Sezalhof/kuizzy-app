@@ -37,11 +37,14 @@ export default function FriendPendingCard({ request }) {
   const handleAccept = async () => {
     setLoading(true);
     try {
+      // Update the request status AND add participants array
       await updateDoc(doc(db, "friend_requests", request.id), {
         status: "accepted",
+        participants: [request.fromId, request.toId], // <-- added
       });
       toast.success("🎉 Friend added to your team!");
     } catch (error) {
+      console.error("[FriendPendingCard] Accept error:", error);
       toast.error("❌ Couldn't accept the invite.");
     } finally {
       setLoading(false);
@@ -54,6 +57,7 @@ export default function FriendPendingCard({ request }) {
       await deleteDoc(doc(db, "friend_requests", request.id));
       toast.info("❌ Invite declined.");
     } catch (error) {
+      console.error("[FriendPendingCard] Reject error:", error);
       toast.error("⚠️ Failed to reject invite.");
     } finally {
       setLoading(false);

@@ -2,88 +2,79 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ----------------------
-    // Users
-    // ----------------------
-    match /users/{userId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth.uid == userId;
-    }
+    /// Public profile (any signed-in user can read)
+  match /users/{userId} {
+  allow read: if request.auth != null;  // any signed-in user can read
+  allow write: if request.auth != null && request.auth.uid == userId;
+  }
 
-    // ----------------------
+
+        // ----------------------
     // Friend requests
     // ----------------------
     match /friend_requests/{requestId} {
       allow read, write: if request.auth != null;
     }
+    
 
     // ----------------------
-    // Groups
+    // Scores (individual test attempts)
     // ----------------------
-    match /groups/{groupId} {
+    match /scores/{docId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null &&
-        (
-          !exists(/databases/$(database)/documents/groups/$(groupId)) ||
-          get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId == request.auth.uid ||
-          (
-            resource.data.memberIds is list &&
-            request.resource.data.memberIds is list &&
-            request.resource.data.memberIds.size() >= resource.data.memberIds.size()
-          )
-        );
+      allow write: if request.auth != null 
+                   && request.auth.uid == request.resource.data.userId;
     }
 
     // ----------------------
-    // Scores (leaderboards)
-    // ----------------------
-    match /scores/{scoreId} {
-      allow read: if request.auth != null;
-
-      allow write: if request.auth != null &&
-        request.resource.data.userId == request.auth.uid &&
-        (
-          // Group leaderboard
-          (request.resource.data.groupId != null && exists(/databases/$(database)/documents/groups/$(request.resource.data.groupId))) ||
-          // Global leaderboard
-          request.resource.data.global != null ||
-          // School leaderboard
-          request.resource.data.schoolId != null ||
-          // Union/Pouroshava leaderboard
-          request.resource.data.unionId != null ||
-          // Upazila leaderboard
-          request.resource.data.upazilaId != null ||
-          // District leaderboard
-          request.resource.data.districtId != null ||
-          // Division leaderboard
-          request.resource.data.divisionId != null
-        );
-    }
-
-    // ----------------------
-    // Test attempts
+    // Test Attempts
     // ----------------------
     match /test_attempts/{attemptId} {
-      allow read: if request.auth != null;
-
-      allow write: if request.auth != null
-                   && request.resource.data.userId == request.auth.uid
-                   && request.resource.data.testId != null
-                   && request.resource.data.score != null
-                   && request.resource.data.totalQuestions != null
-                   && request.resource.data.startedAt != null
-                   && request.resource.data.finishedAt != null
-                   // optional schoolId can be null or string
-                   && (request.resource.data.schoolId == null || request.resource.data.schoolId is string)
+      allow create: if request.auth != null 
+                    && request.resource.data.userId == request.auth.uid;
+      allow read: if request.auth != null 
+                  && resource.data.userId == request.auth.uid;
     }
 
     // ----------------------
-    // Leaderboards (optional read-only)
+    // User Ranks (per-scope leaderboard entries)
     // ----------------------
-    match /leaderboards/{scope}/{id}/{period}/{userId} {
+    match /userRanks/{rankId} {
       allow read: if request.auth != null;
-      allow write: if false; // write only via admin functions
+      allow write: if false; // aggregation-only, client cannot write
     }
 
+    // ----------------------
+    // Leaderboards (read-only)
+    // ----------------------
+    match /leaderboards/{leaderboardId} {
+      allow read: if request.auth != null;
+      allow write: if false; // read-only to clients
+    }
+         // ----------------------
+    // Group for seperate security
+    // ----------------------
+     match /contexts/{contextType}/items/{contextId}/groups/{groupId} {
+    allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
+    allow read: if request.auth != null && request.auth.uid in resource.data.memberIds;
+    allow update, delete: if request.auth != null && request.auth.uid == resource.data.ownerId;
+   }
+
+    // ----------------------
+    // Generic Contexts (school, group, district, upazila, division, global)
+    // ----------------------
+    match /contexts/{contextType}/items/{contextId} {
+      // Metadata of each context (e.g. name, createdBy, scope)
+      allow read: if request.auth != null;
+      allow write: if request.auth != null; 
+    }
+
+    // ----------------------
+    // Subcollections under contexts (teams, scores, members, etc.)
+    // ----------------------
+    match /contexts/{contextType}/items/{contextId}/{subCol}/{docId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
   }
 }

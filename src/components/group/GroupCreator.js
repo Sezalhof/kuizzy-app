@@ -19,7 +19,26 @@ export default function GroupCreator({ onClose }) {
   const [selectedFriends, setSelectedFriends] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [message, setMessage] = useState("");
+  const [userProfile, setUserProfile] = useState(null);
 
+  // Fetch user profile
+  useEffect(() => {
+    const fetchProfile = async () => {
+      if (!user?.uid) return;
+      try {
+        const snap = await getDoc(doc(db, "users", user.uid));
+        if (snap.exists()) {
+          setUserProfile({ uid: user.uid, ...snap.data() });
+        }
+      } catch (err) {
+        console.error("[GroupCreator] Error fetching profile:", err);
+        setMessage("❌ Failed to load your profile.");
+      }
+    };
+    fetchProfile();
+  }, [user?.uid]);
+
+  // Fetch accepted friends
   useEffect(() => {
     const fetchAcceptedFriends = async () => {
       if (!user?.uid) return;
@@ -51,13 +70,14 @@ export default function GroupCreator({ onClose }) {
         }
         setFriends(loaded);
       } catch (err) {
-        console.error("Error fetching guests:", err);
-        setMessage("❌ Failed to load guests.");
+        console.error("[GroupCreator] Error fetching friends:", err);
+        setMessage("❌ Failed to load friends.");
       }
     };
     fetchAcceptedFriends();
   }, [user?.uid]);
 
+  // Filter friends by search
   const filteredFriends = friends.filter((f) => {
     const term = searchTerm.toLowerCase();
     return (
@@ -73,43 +93,74 @@ export default function GroupCreator({ onClose }) {
     );
   };
 
+  // Automatic context resolution
+  const resolveContext = () => {
+    if (!userProfile) return null;
+
+    const contextMap = [
+      ["schoolId", "school"],
+      ["unionId", "union"],
+      ["upazilaId", "upazila"],
+      ["districtId", "district"],
+      ["divisionId", "division"],
+    ];
+
+    for (const [key, type] of contextMap) {
+      if (userProfile[key]) {
+        return { contextType: type, contextId: userProfile[key] };
+      }
+    }
+
+    return null;
+  };
+
   const handleCreate = async () => {
     if (!groupName.trim() || selectedFriends.length === 0) {
-      setMessage("⚠️ Please enter a name and select guests.");
+      setMessage("⚠️ Please enter a group name and select members.");
       return;
     }
+
+    const context = resolveContext();
+    if (!context) {
+      setMessage("⚠️ Cannot determine your context for group creation.");
+      return;
+    }
+
 
     const groupUid = crypto.randomUUID();
 
     try {
-      await setDoc(doc(db, "groups", groupUid), {
-        id: groupUid,
-        groupUid,
-        name: groupName,
-        ownerId: user.uid,
-        memberIds: [user.uid, ...selectedFriends],
-        createdAt: Date.now(),
-      });
-
-      setMessage("✅ Team created successfully!");
+      await setDoc(
+        doc(db, `groups/${groupUid}`),
+        {
+          id: groupUid,
+          groupUid: groupUid,
+          name: groupName,
+          ownerId: user.uid,
+          memberIds: [user.uid, ...selectedFriends],
+          createdAt: Date.now(),
+        }
+      );
+      
+      setMessage("✅ Group created successfully!");
       setGroupName("");
       setSelectedFriends([]);
       onClose?.();
     } catch (err) {
-      console.error("Error creating group:", err);
-      setMessage("❌ Failed to create group.");
+      console.error("[GroupCreator] Error creating group:", err);
+      setMessage("❌ Failed to create group. Check permissions.");
     }
   };
 
   return (
     <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full">
       <h2 className="text-xl font-bold text-blue-700 mb-4 text-center">
-        Create a Team
+        Create a Group
       </h2>
 
       <input
         type="text"
-        placeholder="Enter team name"
+        placeholder="Enter group name"
         value={groupName}
         onChange={(e) => setGroupName(e.target.value)}
         className="w-full px-3 py-2 mb-4 border rounded"
@@ -117,14 +168,14 @@ export default function GroupCreator({ onClose }) {
 
       <input
         type="text"
-        placeholder="🔍 Search guests"
+        placeholder="🔍 Search members"
         value={searchTerm}
         onChange={(e) => setSearchTerm(e.target.value)}
         className="w-full px-3 py-2 mb-4 border rounded"
       />
 
       {filteredFriends.length === 0 ? (
-        <p className="text-sm text-gray-500 mb-4">No guests found.</p>
+        <p className="text-sm text-gray-500 mb-4">No members found.</p>
       ) : (
         <div className="max-h-[280px] overflow-y-auto mb-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
           {filteredFriends.map((friend) => (
@@ -149,7 +200,7 @@ export default function GroupCreator({ onClose }) {
                 />
               )}
               <div>
-                <p className="font-medium">{friend.name || "Unnamed Guest"}</p>
+                <p className="font-medium">{friend.name || "Unnamed Member"}</p>
                 <p className="text-xs text-gray-500">
                   {friend.email || friend.phone || "No contact info"}
                 </p>
@@ -164,8 +215,10 @@ export default function GroupCreator({ onClose }) {
       )}
 
       <div className="flex justify-end gap-3">
-        <Button onClick={handleCreate}>Create Team</Button>
+        <Button onClick={handleCreate}>Create Group</Button>
       </div>
     </div>
   );
 }
+
+

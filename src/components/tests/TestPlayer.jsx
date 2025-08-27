@@ -1,7 +1,18 @@
+// src/components/tests/TestPlayer.jsx
 import React, { useState, useEffect } from "react";
-import { saveTestAttempt } from "../../utils/saveTestAttempt";
+import { saveAttempt } from "../../utils/saveAttemptAndLeaderboard";
+import useAuth from "../../hooks/useAuth";
 
-export default function TestPlayer({ test, onComplete, userId, profile }) {
+/**
+ * TestPlayer Component
+ * Props:
+ * - test: test object containing questions
+ * - onComplete: callback after test finishes
+ * - profile: user profile
+ * - profileLoading: boolean
+ */
+export default function TestPlayer({ test, onComplete, profile, profileLoading }) {
+  const { user, loading: authLoading } = useAuth();
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [userAnswers, setUserAnswers] = useState({});
   const [playing, setPlaying] = useState(false);
@@ -11,16 +22,17 @@ export default function TestPlayer({ test, onComplete, userId, profile }) {
   const [startedAt, setStartedAt] = useState(null);
   const [todayCombinedScore, setTodayCombinedScore] = useState(null);
 
-  useEffect(() => {
-    console.log("[TestPlayer] Component mounted. Profile:", profile, "UserId:", userId);
-  }, [profile, userId]);
-
-  if (!test)
-    return <div className="p-4 text-red-600">Test not found in ExamTable.</div>;
-
-  const questions = test.questions || [];
+  const questions = test?.questions || [];
   const totalQuestions = questions.length;
   const currentQuestion = questions[currentQuestionIndex];
+
+  // Determine groupId dynamically from profile
+  const currentGroupId = profile?.schoolId || profile?.groupId || null;
+
+  // --- Wait for profile or auth loading
+  if (authLoading || profileLoading) return <div className="p-4 text-gray-600">Loading...</div>;
+  if (!profile || !user) return <div className="p-4 text-red-600">User profile not found.</div>;
+  if (!test) return <div className="p-4 text-red-600">Test not found.</div>;
 
   const handleStart = () => {
     setPlaying(true);
@@ -31,8 +43,6 @@ export default function TestPlayer({ test, onComplete, userId, profile }) {
     setSavingError(null);
     setStartedAt(new Date());
     setTodayCombinedScore(null);
-
-    console.log("[TestPlayer] Test started:", test.id, "Time:", new Date());
   };
 
   const handleAnswer = (optionIndex) => {
@@ -44,68 +54,35 @@ export default function TestPlayer({ test, onComplete, userId, profile }) {
 
     if (currentQuestionIndex + 1 < totalQuestions) {
       setCurrentQuestionIndex((prev) => prev + 1);
-    } else handleFinish();
-  };
-
-  const handleFinish = async () => {
-    setFinished(true);
-    setPlaying(false);
-
-    console.log("[TestPlayer] handleFinish triggered");
-    console.log("[TestPlayer] User profile:", profile);
-    console.log("[TestPlayer] UserId prop:", userId);
-    console.log("[TestPlayer] Test object:", test);
-    console.log("[TestPlayer] Current Score:", score, "of", totalQuestions);
-    console.log("[TestPlayer] User answers:", userAnswers);
-
-    try {
-      const finishedAt = new Date();
-      const elapsedSec = Math.max(
-        0,
-        Math.round((finishedAt.getTime() - (startedAt ?? finishedAt).getTime()) / 1000)
-      );
-      const remainingTime = Math.max(0, (test.duration ?? 900) - elapsedSec);
-      const combinedScore = Number(score || 0) + remainingTime / 60;
-
-      setTodayCombinedScore(combinedScore.toFixed(2));
-
-      const payload = {
-        userId: userId,
-        displayName: profile?.displayName ?? "Unknown",
-        testId: test.id,
-        score: score ?? 0,
-        totalQuestions: totalQuestions ?? 0,
-        userAnswers: userAnswers ?? {},
-        startedAt: startedAt ?? new Date(),
-        finishedAt,
-        testDurationSec: test.duration ?? 900,
-        groupId: null, // removed for rules safety
-        createdAt: new Date(),
-      };
-
-      console.log("[TestPlayer] Payload prepared for saveTestAttempt:", payload);
-
-      if (!payload.userId) {
-        console.error("[TestPlayer] Missing userId! Attempt not saved.", payload);
-        setSavingError("Missing userId. Cannot save test attempt.");
-        return;
-      }
-
-      await saveTestAttempt(payload); // Firestore write
-      setSavingError(null);
-      console.log("[TestPlayer] Test attempt saved successfully.");
-    } catch (err) {
-      setSavingError(err.message);
-      console.error("[TestPlayer] Failed to save test attempt:", err.code, err.message);
+    } else {
+      handleFinish();
     }
-
-    onComplete?.(score, totalQuestions, userAnswers, startedAt, new Date());
   };
 
+ // Replace the handleFinish function in TestPlayer.jsx with this:
+
+// Replace the handleFinish function in TestPlayer.jsx with this:
+
+const handleFinish = async () => {
+  setFinished(true);
+  setPlaying(false);
+
+  const finishedAt = new Date();
+  const elapsedSec = Math.max(0, Math.round((finishedAt.getTime() - (startedAt ?? finishedAt).getTime()) / 1000));
+  const remainingTime = Math.max(0, (test.duration ?? 900) - elapsedSec);
+  const combinedScore = Number(score || 0) + remainingTime / 60;
+  setTodayCombinedScore(combinedScore.toFixed(2));
+
+  // DON'T save here - let TestPage handle the saving
+  // Just call onComplete with the results
+  onComplete?.(score, totalQuestions, userAnswers, startedAt, finishedAt);
+};
+
+  // --- UI Rendering ---
   if (!playing) {
     return (
       <div className="p-4 border rounded shadow">
-        <h2 className="text-xl font-bold mb-4">Playing: {test.title}</h2>
+        <h2 className="text-xl font-bold mb-4">{test.title}</h2>
         <button
           onClick={handleStart}
           className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -124,13 +101,9 @@ export default function TestPlayer({ test, onComplete, userId, profile }) {
           Your Score: {score} / {totalQuestions}
         </p>
         {todayCombinedScore && (
-          <p className="font-semibold mt-1">
-            Today’s Combined Score: {todayCombinedScore}
-          </p>
+          <p className="font-semibold mt-1">Today’s Combined Score: {todayCombinedScore}</p>
         )}
-        {savingError && (
-          <p className="text-red-600 mt-2">Failed to save attempt: {savingError}</p>
-        )}
+        {savingError && <p className="text-red-600 mt-2">Failed to save attempt: {savingError}</p>}
         <button
           onClick={() => {
             setFinished(false);

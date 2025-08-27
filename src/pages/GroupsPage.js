@@ -1,9 +1,8 @@
-//src/pages/GroupPage.js
-import React, { useEffect, useState } from "react";
+// src/pages/GroupsPage.js
+import React, { useEffect, useState, useCallback } from "react";
 import {
   collection,
   getDocs,
-  getDoc,
   query,
   where,
   doc,
@@ -16,113 +15,102 @@ import useAuth from "../hooks/useAuth";
 import { useUserProfile } from "../hooks/useUserProfile";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
 import GroupCreator from "../components/group/GroupCreator";
+import Leaderboard from "../components/Leaderboard";
 
 export default function GroupsPage() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const validUid = !authLoading && typeof user?.uid === "string" ? user.uid : null;
+  const { profile, loading: profileLoading } = useUserProfile(validUid ?? null);
 
-  const { profile, loading: profileLoading } = useUserProfile(validUid);
-
-  const [teams, setTeams] = useState([]);
-  const [loadingTeams, setLoadingTeams] = useState(true);
+  const [groups, setGroups] = useState([]);
+  const [loadingGroups, setLoadingGroups] = useState(true);
   const [error, setError] = useState("");
   const [showGroupModal, setShowGroupModal] = useState(false);
 
+  // Fetch all groups where the current user is a member
+  const fetchGroups = useCallback(async () => {
+    if (!validUid || authLoading || profileLoading) return;
+
+    setLoadingGroups(true);
+    try {
+      const groupQuery = query(
+        collection(db, "groups"),
+        where("memberIds", "array-contains", validUid)
+      );
+
+      const snapshot = await getDocs(groupQuery);
+
+      const groupsWithMembers = await Promise.all(
+        snapshot.docs.map(async (docSnap) => {
+          const groupData = docSnap.data();
+          const memberIds = groupData.memberIds || [];
+
+          const membersDetailed = await Promise.all(
+            memberIds.map(async (uid) => {
+              try {
+                const userSnap = await getDocs(doc(db, "users", uid));
+                const userData = userSnap.exists() ? userSnap.data() : {};
+                return {
+                  uid,
+                  displayName: userData.name || "Unknown",
+                  photoURL: userData.photoURL || userData.avatar || "/fallback-logo.png",
+                  grade: userData.grade || "N/A",
+                  school: userData.school || "N/A",
+                };
+              } catch {
+                return {
+                  uid,
+                  displayName: "Unknown",
+                  photoURL: "/fallback-logo.png",
+                  grade: "N/A",
+                  school: "N/A",
+                };
+              }
+            })
+          );
+
+          return { id: docSnap.id, ...groupData, membersDetailed };
+        })
+      );
+
+      setGroups(groupsWithMembers);
+    } catch (err) {
+      console.error(err);
+      setError("❌ Failed to load groups. Please try again later.");
+    } finally {
+      setLoadingGroups(false);
+    }
+  }, [validUid, authLoading, profileLoading]);
+
   useEffect(() => {
-    const fetchTeams = async () => {
-      if (!validUid || !profile || profileLoading || authLoading) return;
+    fetchGroups();
+  }, [fetchGroups]);
 
-      setLoadingTeams(true);
-      try {
-        const groupQuery = query(
-          collection(db, "groups"),
-          where("memberIds", "array-contains", validUid)
-        );
-        const groupSnapshot = await getDocs(groupQuery);
-
-        const teamsWithDetails = await Promise.all(
-          groupSnapshot.docs.map(async (docSnap) => {
-            const groupData = docSnap.data();
-            const memberIds = groupData.memberIds || [];
-
-            // Fetch detailed info for members (avatar, name, grade, school)
-            const membersDetailed = await Promise.all(
-              memberIds.map(async (uid) => {
-                try {
-                  const userSnap = await getDoc(doc(db, "users", uid));
-                  const userData = userSnap.exists() ? userSnap.data() : {};
-                  return {
-                    uid,
-                    displayName: userData.name || "Unknown",
-                    photoURL: userData.photoURL || userData.avatar || "/fallback-logo.png",
-                    grade: userData.grade || null,
-                    school: userData.school || null,
-                  };
-                } catch {
-                  return {
-                    uid,
-                    displayName: "Unknown",
-                    photoURL: "/fallback-logo.png",
-                    grade: null,
-                    school: null,
-                  };
-                }
-              })
-            );
-
-            return {
-              id: docSnap.id,
-              ...groupData,
-              membersDetailed,
-            };
-          })
-        );
-
-        setTeams(teamsWithDetails);
-      } catch (err) {
-        console.error("[GroupsPage] Failed to load teams:", err);
-        setError("❌ Failed to load teams.");
-      } finally {
-        setLoadingTeams(false);
-      }
-    };
-
-    fetchTeams();
-  }, [validUid, profile, profileLoading, authLoading]);
-
+  // Delete a group
   const handleDeleteGroup = async (groupId) => {
-    const confirm = window.confirm("Are you sure you want to delete this group?");
-    if (!confirm) return;
-
+    if (!window.confirm("Are you sure you want to delete this group?")) return;
     try {
       await deleteDoc(doc(db, "groups", groupId));
-      setTeams((prev) => prev.filter((team) => team.id !== groupId));
-    } catch (err) {
-      console.error("Failed to delete group:", err);
-      alert("❌ Failed to delete group.");
+      setGroups((prev) => prev.filter((g) => g.id !== groupId));
+    } catch {
+      setError("❌ Failed to delete group. Please try again.");
     }
   };
 
+  // Leave a group
   const handleLeaveGroup = async (groupId, currentMembers) => {
-    const confirm = window.confirm("Leave this group?");
-    if (!confirm) return;
-
+    if (!window.confirm("Leave this group?")) return;
     try {
       const updated = currentMembers.filter((uid) => uid !== validUid);
-      await updateDoc(doc(db, "groups", groupId), {
-        memberIds: updated,
-      });
-      setTeams((prev) => prev.filter((team) => team.id !== groupId));
-    } catch (err) {
-      console.error("Leave group error:", err);
+      await updateDoc(doc(db, "groups", groupId), { memberIds: updated });
+      setGroups((prev) => prev.filter((g) => g.id !== groupId));
+    } catch {
       alert("❌ Failed to leave group.");
     }
   };
 
-  if (authLoading || profileLoading || loadingTeams) {
-    return <LoadingSpinner />;
-  }
+  if (authLoading || profileLoading || loadingGroups) return <LoadingSpinner />;
 
   if (!user || !profile) {
     return (
@@ -132,34 +120,25 @@ export default function GroupsPage() {
     );
   }
 
-  const acceptedFriends =
-    profile.friends?.filter((f) => f.status === "accepted") || [];
+  const acceptedFriends = profile?.friends?.filter((f) => f.status === "accepted") || [];
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
-      {/* Back button */}
-      <button
-        onClick={() => navigate(-1)}
-        className="mb-4 text-blue-600 hover:underline text-sm"
-      >
+      <button onClick={() => navigate(-1)} className="mb-4 text-blue-600 hover:underline text-sm">
         ← Back
       </button>
 
-      <h1 className="text-2xl font-bold text-center text-blue-700 mb-6">
-        ✅ My Teams
-      </h1>
+      <h1 className="text-2xl font-bold text-center text-blue-700 mb-6">✅ My Groups</h1>
 
-      {/* Create Team */}
       <div className="text-center mb-6">
         <button
           onClick={() => setShowGroupModal(true)}
           className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
         >
-          ➕ Create New Team
+          ➕ Create New Group
         </button>
       </div>
 
-      {/* Modal */}
       {showGroupModal && (
         <div
           className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
@@ -176,117 +155,101 @@ export default function GroupsPage() {
             >
               ×
             </button>
-            <GroupCreator onClose={() => setShowGroupModal(false)} />
+            <GroupCreator
+              onClose={() => setShowGroupModal(false)}
+              onCreated={fetchGroups} // Fetch immediately after creation
+            />
           </div>
         </div>
       )}
 
       {error && <div className="text-red-500 text-center mt-4">{error}</div>}
 
-      {/* Team Cards */}
       <div className="mt-8 grid gap-4">
-        {teams.length === 0 ? (
-          <p className="text-center text-gray-500">
-            You're not part of any teams yet.
-          </p>
+        {groups.length === 0 ? (
+          <p className="text-center text-gray-500">You're not part of any groups yet.</p>
         ) : (
-          teams.map((team) => {
-            const groupUid = team.groupUid || team.id; // fallback for legacy groups
+          groups.map((group) => (
+            <div key={group.id} className="border rounded-lg p-4 shadow-sm bg-white">
+              <h2 className="text-lg font-semibold text-gray-800">{group.name}</h2>
+              <p className="text-sm text-gray-500 mb-2">
+                Members: {group.membersDetailed.length}
+              </p>
 
-            return (
-              <div
-                key={team.id}
-                className="border rounded-lg p-4 shadow-sm bg-white"
-              >
-                <h2 className="text-lg font-semibold text-gray-800">
-                  {team.name}
-                </h2>
-                <p className="text-sm text-gray-500 mb-2">
-                  Members: {team.membersDetailed.length}
-                </p>
-
-                {/* Show member avatars & names horizontally */}
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {team.membersDetailed.map((member) => (
-                    <div
-                      key={member.uid}
-                      className="flex items-center gap-2 bg-gray-50 rounded px-2 py-1"
-                      title={`${member.displayName}\nClass: ${
-                        member.grade || "N/A"
-                      }\nSchool: ${member.school || "N/A"}`}
-                    >
-                      <img
-                        src={member.photoURL || "/fallback-logo.png"}
-                        alt={`${member.displayName} avatar`}
-                        className="w-8 h-8 rounded-full object-cover flex-shrink-0"
-                        loading="lazy"
-                        onError={(e) => {
-                          e.target.onerror = null;
-                          e.target.src = "/fallback-logo.png";
-                        }}
-                      />
-                      <span className="text-xs font-medium">{member.displayName}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex flex-wrap gap-2 mt-2">
-                  <Link
-                    to={`/group-quiz/${groupUid}`}
-                    className="bg-green-600 text-white text-sm px-3 py-1 rounded hover:bg-green-700"
+              <div className="flex flex-wrap gap-2 mb-4">
+                {group.membersDetailed.map((member) => (
+                  <div
+                    key={member.uid}
+                    className="flex items-center gap-2 bg-gray-50 rounded px-2 py-1"
+                    title={`${member.displayName}\nClass: ${member.grade}\nSchool: ${member.school}`}
                   >
-                    📝 Take A Test
-                  </Link>
-
-                  <Link
-                    to={`/group-members/${groupUid}`}
-                    className="bg-yellow-500 text-white text-sm px-3 py-1 rounded hover:bg-yellow-600"
-                  >
-                    🛡️ Show fighters
-                  </Link>
-
-                  <Link
-                    to={`/group-leaderboard/${groupUid}`}
-                    className="bg-purple-600 text-white text-sm px-3 py-1 rounded hover:bg-purple-700"
-                  >
-                    🏆 Leaderboard
-                  </Link>
-
-                  {team.ownerId === validUid && team.memberIds?.length === 1 && (
-                    <button
-                      onClick={() => handleDeleteGroup(team.id)}
-                      className="bg-red-600 text-white text-sm px-3 py-1 rounded hover:bg-red-700"
-                    >
-                      🗑️ Delete Group
-                    </button>
-                  )}
-
-                  {team.ownerId !== validUid &&
-                    team.memberIds?.includes(validUid) && (
-                      <button
-                        onClick={() => handleLeaveGroup(team.id, team.memberIds)}
-                        className="bg-gray-600 text-white text-sm px-3 py-1 rounded hover:bg-gray-700"
-                      >
-                        🚪 Leave Group
-                      </button>
-                    )}
-                </div>
+                    <img
+                      src={member.photoURL || "/fallback-logo.png"}
+                      alt={`${member.displayName} avatar`}
+                      className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                      loading="lazy"
+                      onError={(e) => { e.target.onerror = null; e.target.src = "/fallback-logo.png"; }}
+                    />
+                    <span className="text-xs font-medium">{member.displayName}</span>
+                  </div>
+                ))}
               </div>
-            );
-          })
+
+              <div className="flex flex-wrap gap-2 mt-2">
+  <Link
+    to={`/group-quiz/${group.id}`}
+    className="bg-green-600 text-white text-sm px-3 py-1 rounded hover:bg-green-700"
+  >
+    📝 Take A Test
+  </Link>
+
+  <Link
+    to={`/group-members/${group.id}`}
+    className="bg-yellow-500 text-white text-sm px-3 py-1 rounded hover:bg-yellow-600"
+  >
+    🛡️ Show Members
+  </Link>
+
+  <Link
+    to={`/group-leaderboard/${group.id}`}
+    className="bg-purple-600 text-white text-sm px-3 py-1 rounded hover:bg-purple-700"
+  >
+    🏆 Leaderboard
+  </Link>
+
+  {group.ownerId === validUid && (
+    <button
+      onClick={() => handleDeleteGroup(group.id)}
+      className="bg-red-600 text-white text-sm px-3 py-1 rounded hover:bg-red-700"
+    >
+      🗑️ Delete Group
+    </button>
+  )}
+
+  {group.ownerId !== validUid && group.memberIds?.includes(validUid) && (
+    <button
+      onClick={() => handleLeaveGroup(group.id, group.memberIds)}
+      className="bg-gray-600 text-white text-sm px-3 py-1 rounded hover:bg-gray-700"
+    >
+      🚪 Leave Group
+    </button>
+  )}
+</div>
+
+
+              <Leaderboard scope="group" groupId={group.id} />
+            </div>
+          ))
         )}
       </div>
 
-      {/* Guest Room */}
       <div className="mt-12">
         <h2 className="text-xl font-semibold text-blue-700 mb-4">
-          🏡 Your teammates in the Guest Room ({acceptedFriends.length})
+          🏡 Your friends in the Guest Room ({acceptedFriends.length})
         </h2>
 
         {acceptedFriends.length === 0 ? (
-          <p className="text-gray-500">
-            No teammates in the Guest Room yet 💺👀
-          </p>
+          <p className="text-gray-500">No friends in the Guest Room yet 💺👀</p>
         ) : (
           <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             {acceptedFriends.map((friend) => (
@@ -296,18 +259,15 @@ export default function GroupsPage() {
               >
                 <img
                   src={friend.photoURL || friend.avatar || "/fallback-logo.png"}
-                  alt={`${friend.name || "Unnamed Guest"} avatar`}
+                  alt={`${friend.name || "Unnamed Friend"} avatar`}
                   className="w-12 h-12 rounded-full object-cover flex-shrink-0"
                   loading="lazy"
-                  onError={(e) => {
-                    e.target.onerror = null;
-                    e.target.src = "/fallback-logo.png";
-                  }}
+                  onError={(e) => { e.target.onerror = null; e.target.src = "/fallback-logo.png"; }}
                 />
                 <div>
-                  <p className="font-semibold">{friend.name || "Unnamed Guest"}</p>
+                  <p className="font-semibold">{friend.name || "Unnamed Friend"}</p>
                   <p className="text-xs text-gray-600">
-                    Class: {friend.grade || "N/A"} | School: {friend.school || "N/A"}
+                    Class: {friend.grade} | School: {friend.school}
                   </p>
                 </div>
               </li>

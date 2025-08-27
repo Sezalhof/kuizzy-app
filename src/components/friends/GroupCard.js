@@ -5,6 +5,7 @@ import { db } from "../../firebase";
 import fallbackLogo from "../../assets/fallback-logo.png";
 import ManageGroupMembers from "./ManageGroupMembers";
 import InviteFriendsModal from "./InviteFriendsModal";
+import { getUserProfile } from "../../hooks/getUserProfile";
 
 export default function GroupCard({ group, currentUserId, onLeft }) {
   const [showMembers, setShowMembers] = useState(false);
@@ -19,38 +20,24 @@ export default function GroupCard({ group, currentUserId, onLeft }) {
   useEffect(() => {
     const fetchMembers = async () => {
       if (group.memberIds?.length && (!group.membersDetailed || group.membersDetailed.length === 0)) {
-        const enriched = await Promise.all(
-          group.memberIds.map(async (uid) => {
-            try {
-              const snap = await getDoc(doc(db, "users", uid));
-              const data = snap.exists() ? snap.data() : {};
-              return {
-                uid,
-                displayName: data.name || "Unknown",
-                grade: data.grade || "",
-                school: data.school || "",
-                photoURL: data.photoURL || "", // profile pic URL if any
-              };
-            } catch {
-              return {
-                uid,
-                displayName: "Unknown",
-                grade: "",
-                school: "",
-                photoURL: "",
-              };
-            }
-          })
-        );
-        setMembersDetailed(enriched);
+
+const enriched = await Promise.all(
+  group.memberIds.map(async (uid) => {
+    const data = await getUserProfile(uid);
+    return {
+      uid,
+      displayName: data?.name || "Unknown",
+      grade: data?.grade || "",
+      school: data?.school || "",
+      photoURL: data?.photoURL || "",
       }
     };
 
     fetchMembers();
   }, [group]);
 
-  const handleLeaveTeam = async () => {
-    const confirmLeave = window.confirm("Are you sure you want to 🚪 leave this team?");
+  const handleLeaveGroup = async () => {
+    const confirmLeave = window.confirm("Are you sure you want to 🚪 leave this group?");
     if (!confirmLeave) return;
 
     try {
@@ -59,7 +46,7 @@ export default function GroupCard({ group, currentUserId, onLeft }) {
       });
       if (onLeft) onLeft(group.id);
     } catch (err) {
-      alert("❌ Failed to leave team: " + err.message);
+      alert("❌ Failed to leave group: " + err.message);
     }
   };
 
@@ -77,7 +64,7 @@ export default function GroupCard({ group, currentUserId, onLeft }) {
         <div className="flex items-center gap-4">
           <img
             src={group.photoURL || fallbackLogo}
-            alt="Team"
+            alt="Group"
             className="w-12 h-12 rounded-full object-cover"
             onError={(e) => {
               e.target.onerror = null;
@@ -92,10 +79,10 @@ export default function GroupCard({ group, currentUserId, onLeft }) {
 
         {!isOwner && (
           <button
-            onClick={handleLeaveTeam}
+            onClick={handleLeaveGroup}
             className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600"
           >
-            🚪 Leave Team
+            🚪 Leave Group
           </button>
         )}
       </div>
@@ -108,11 +95,12 @@ export default function GroupCard({ group, currentUserId, onLeft }) {
           🧠 Take Quiz
         </button>
         <button
-          onClick={handleViewLeaderboard}
-          className="bg-yellow-500 text-white px-3 py-1 rounded hover:bg-yellow-600"
-        >
-          🏆 Leaderboard
-        </button>
+  onClick={() => navigate(`/leaderboard?scope=group&groupId=${group.id}`)}
+  className="bg-yellow-500 text-white px-3 py-1 rounded hover:bg-yellow-600"
+>
+  🏆 Leaderboard
+</button>
+
         <button
           onClick={() => setShowMembers(!showMembers)}
           className="bg-gray-200 text-gray-800 px-3 py-1 rounded hover:bg-gray-300"

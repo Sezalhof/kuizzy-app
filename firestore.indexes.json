@@ -4,42 +4,84 @@
       "collectionGroup": "scores",
       "queryScope": "COLLECTION",
       "fields": [
-        {
-          "fieldPath": "score",
-          "order": "DESCENDING"
-        },
-        {
-          "fieldPath": "timeTaken",
-          "order": "ASCENDING"
-        }
+        { "fieldPath": "twoMonthPeriod", "order": "ASCENDING" },
+        { "fieldPath": "combinedScore", "order": "DESCENDING" },
+        { "fieldPath": "timeTaken", "order": "ASCENDING" },
+        { "fieldPath": "finishedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "scores",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "schoolId", "order": "ASCENDING" },
+        { "fieldPath": "twoMonthPeriod", "order": "ASCENDING" },
+        { "fieldPath": "combinedScore", "order": "DESCENDING" },
+        { "fieldPath": "timeTaken", "order": "ASCENDING" },
+        { "fieldPath": "finishedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "scores",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "groupId", "order": "ASCENDING" },
+        { "fieldPath": "twoMonthPeriod", "order": "ASCENDING" },
+        { "fieldPath": "combinedScore", "order": "DESCENDING" },
+        { "fieldPath": "timeTaken", "order": "ASCENDING" },
+        { "fieldPath": "finishedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "scores",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "unionId", "order": "ASCENDING" },
+        { "fieldPath": "twoMonthPeriod", "order": "ASCENDING" },
+        { "fieldPath": "combinedScore", "order": "DESCENDING" },
+        { "fieldPath": "timeTaken", "order": "ASCENDING" },
+        { "fieldPath": "finishedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "scores",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "upazilaId", "order": "ASCENDING" },
+        { "fieldPath": "twoMonthPeriod", "order": "ASCENDING" },
+        { "fieldPath": "combinedScore", "order": "DESCENDING" },
+        { "fieldPath": "timeTaken", "order": "ASCENDING" },
+        { "fieldPath": "finishedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "scores",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "districtId", "order": "ASCENDING" },
+        { "fieldPath": "twoMonthPeriod", "order": "ASCENDING" },
+        { "fieldPath": "combinedScore", "order": "DESCENDING" },
+        { "fieldPath": "timeTaken", "order": "ASCENDING" },
+        { "fieldPath": "finishedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "scores",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "divisionId", "order": "ASCENDING" },
+        { "fieldPath": "twoMonthPeriod", "order": "ASCENDING" },
+        { "fieldPath": "combinedScore", "order": "DESCENDING" },
+        { "fieldPath": "timeTaken", "order": "ASCENDING" },
+        { "fieldPath": "finishedAt", "order": "DESCENDING" }
       ]
     },
     {
       "collectionGroup": "users",
       "queryScope": "COLLECTION",
       "fields": [
-        {
-          "fieldPath": "role",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "name",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "users",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "role",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "school",
-          "order": "ASCENDING"
-        }
+        { "fieldPath": "role", "order": "ASCENDING" },
+        { "fieldPath": "school", "order": "ASCENDING" }
       ]
     }
   ],
