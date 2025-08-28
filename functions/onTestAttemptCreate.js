@@ -1,8 +1,9 @@
 import admin from "firebase-admin";
 import { getUserProfile } from "./utils/getUserProfile.js";
-import { normalizeId } from "./utils/normalizeId.js";
 
 export const handleTestAttemptCreate = async (event) => {
+  console.log("🔥 Cloud Function: handleTestAttemptCreate triggered");
+  
   const db = admin.firestore();
   const attempt = event.data?.data() || {};
   const userId = attempt.userId;
@@ -20,15 +21,8 @@ export const handleTestAttemptCreate = async (event) => {
     const displayName = attempt.displayName || userProfile?.displayName || "Anonymous";
     const photoURL = attempt.photoURL || userProfile?.photoURL || null;
 
-    // FIX: Get the correct groupId - prioritize attempt.groupId, then userProfile.groupId
+    // Get the correct groupId - prioritize attempt.groupId, then userProfile.groupId
     const groupId = attempt.groupId || userProfile?.groupId || null;
-
-    // Normalize IDs for leaderboard docs
-    const districtIdNorm = normalizeId(attempt.district || userProfile?.district);
-    const divisionIdNorm = normalizeId(attempt.division || userProfile?.division);
-    const schoolIdNorm = normalizeId(attempt.school || userProfile?.school);
-    const unionIdNorm = normalizeId(attempt.union || userProfile?.union);
-    const upazilaIdNorm = normalizeId(attempt.upazila || userProfile?.upazila);
 
     // 2-month period for aggregation
     const now = new Date();
@@ -39,7 +33,9 @@ export const handleTestAttemptCreate = async (event) => {
 
     const batch = db.batch();
 
-    // --- Update global user_ranks ---
+    console.log("📊 Updating leaderboards for user:", userId);
+
+    // --- 1. Update global user_ranks ---
     const userRankRef = db.collection("user_ranks").doc(userId);
     batch.set(
       userRankRef,
@@ -54,13 +50,14 @@ export const handleTestAttemptCreate = async (event) => {
       },
       { merge: true }
     );
+    console.log("✅ User rank queued for update");
 
-    // --- Update group_leaderboards (FIXED: use proper groupId, not school name) ---
-    if (groupId) {
-      // This creates: group_leaderboards/{actualGroupId}/members/{userId}
+    // --- 2. Update group leaderboard (ONLY if proper groupId exists) ---
+    if (groupId && groupId !== attempt.schoolId) {
+      // Only create group leaderboard for actual group IDs, not school names
       const groupRankRef = db
         .collection("group_leaderboards")
-        .doc(groupId) // Use the actual groupId, not slugified
+        .doc(`${groupId}_${twoMonthPeriod}`)
         .collection("members")
         .doc(userId);
 
@@ -69,48 +66,21 @@ export const handleTestAttemptCreate = async (event) => {
         {
           userId,
           displayName,
+          photoURL,
           score,
           totalQuestions,
           combinedScore,
-          schoolId: schoolIdNorm,
+          schoolId: attempt.schoolId || userProfile?.schoolId,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
         { merge: true }
       );
+      console.log("✅ Group leaderboard queued:", `${groupId}_${twoMonthPeriod}`);
+    } else {
+      console.log("❌ No valid groupId, skipping group leaderboard");
     }
 
-    // --- Update normalized district, division, school, union, upazila leaderboards ---
-    const leaderboardTypes = [
-      { type: "district", id: districtIdNorm },
-      { type: "division", id: divisionIdNorm },
-      { type: "school", id: schoolIdNorm },
-      { type: "union", id: unionIdNorm },
-      { type: "upazila", id: upazilaIdNorm },
-    ];
-
-    leaderboardTypes.forEach(({ type, id }) => {
-      if (!id) return;
-      const docRef = db
-        .collection("group_leaderboards")
-        .doc(`${type}_${id}_${twoMonthPeriod}`)
-        .collection("members")
-        .doc(userId);
-
-      batch.set(
-        docRef,
-        {
-          userId,
-          displayName,
-          score,
-          totalQuestions,
-          combinedScore,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-    });
-
-    // --- Update global leaderboard ---
+    // --- 3. Update global leaderboard ONLY ---
     const globalRef = db
       .collection("group_leaderboards")
       .doc(`global_all_${twoMonthPeriod}`)
@@ -122,16 +92,29 @@ export const handleTestAttemptCreate = async (event) => {
       {
         userId,
         displayName,
+        photoURL,
         score,
         totalQuestions,
         combinedScore,
+        // Store geographic info for reference but don't create separate leaderboards
+        schoolId: attempt.schoolId || userProfile?.schoolId,
+        unionId: attempt.unionId || userProfile?.unionId,
+        upazilaId: attempt.upazilaId || userProfile?.upazilaId,
+        districtId: attempt.districtId || userProfile?.districtId,
+        divisionId: attempt.divisionId || userProfile?.divisionId,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
       { merge: true }
     );
+    console.log("✅ Global leaderboard queued");
+
+    // 🚫 REMOVED: All geographic leaderboard creation
+    // No more district_, division_, school_, union_, upazila_ leaderboards
 
     await batch.commit();
+    console.log("🎉 Cloud Function: All leaderboards updated successfully");
+    
   } catch (err) {
-    console.error("[onTestAttemptCreate] Error:", err.message || err);
+    console.error("❌ Cloud Function Error:", err.message || err);
   }
 };

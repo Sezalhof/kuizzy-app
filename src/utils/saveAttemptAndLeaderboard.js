@@ -13,22 +13,25 @@ export function getTwoMonthPeriod(date = new Date()) {
 }
 
 /**
- * Save quiz/test attempt and update ONLY user ranks, group leaderboard (if groupId exists), and global leaderboard
+ * Save quiz/test attempt and update:
+ * 1. test_attempts (raw attempts)
+ * 2. user_ranks (personal bests)
+ * 3. group_leaderboards/{groupId_period} (if groupId provided)
+ * 4. global leaderboard
  */
 export async function saveAttempt({
   userId,
   testId = null,
   score = 0,
   totalQuestions = 0,
-  groupId = null, // ACTUAL group document ID (UUID or normalized)
+  groupId = null, // actual group UUID
   displayName = "Anonymous",
   photoURL = null,
   startedAt = null,
   finishedAt = null,
   testDurationSec = 900,
   userAnswers = {},
-  // Store these for reference but don't create leaderboards for them
-  schoolId = null,
+  schoolId = null,   // kept for reference in user/global
   unionId = null,
   upazilaId = null,
   districtId = null,
@@ -40,15 +43,9 @@ export async function saveAttempt({
   const elapsedSec = Math.max(0, Math.round((finishedAt.getTime() - startedAt.getTime()) / 1000));
   const remainingTime = Math.max(0, testDurationSec - elapsedSec);
   const combinedScore = Number(score) + remainingTime / 60;
-  const twoMonthPeriod = getTwoMonthPeriod();
+  const period = getTwoMonthPeriod();
 
-  console.log("=== SaveAttempt Debug ===");
-  console.log("userId:", userId);
-  console.log("groupId:", groupId);
-  console.log("schoolId:", schoolId);
-  console.log("=========================");
-
-  // --- Save attempt to test_attempts collection ---
+  // --- Save attempt to test_attempts ---
   const attemptData = {
     userId,
     testId,
@@ -65,7 +62,7 @@ export async function saveAttempt({
     upazilaId,
     districtId,
     divisionId,
-    twoMonthPeriod,
+    twoMonthPeriod: period,
     startedAt,
     finishedAt,
     userAnswers,
@@ -75,7 +72,7 @@ export async function saveAttempt({
   const attemptRef = await addDoc(collection(db, "test_attempts"), attemptData);
   console.log("✅ Test attempt saved:", attemptRef.id);
 
-  // --- 1. Update user_ranks (user's personal best) ---
+  // --- Update user_ranks ---
   const userRankRef = doc(db, "user_ranks", userId);
   await setDoc(userRankRef, {
     userId,
@@ -88,12 +85,11 @@ export async function saveAttempt({
   }, { merge: true });
   console.log("✅ User rank updated");
 
-  // --- 2. Update group leaderboard ONLY if groupId exists ---
+  // --- Update group leaderboard ---
   if (groupId) {
-    // Use the exact groupId - don't modify it
-    const groupLeaderboardId = `${groupId}_${twoMonthPeriod}`;
+    const groupLeaderboardId = `${groupId}_${period}`;
     const groupRankRef = doc(db, "group_leaderboards", groupLeaderboardId, "members", userId);
-    
+
     await setDoc(groupRankRef, {
       userId,
       displayName,
@@ -101,18 +97,17 @@ export async function saveAttempt({
       score: Number(score),
       totalQuestions: Number(totalQuestions),
       combinedScore,
-      schoolId,
+      schoolId, // optional extra context
       updatedAt: serverTimestamp(),
     }, { merge: true });
+
     console.log("✅ Group leaderboard updated:", groupLeaderboardId);
-  } else {
-    console.log("❌ No groupId provided, skipping group leaderboard");
   }
 
-  // --- 3. Update global leaderboard ---
-  const globalLeaderboardId = `global_all_${twoMonthPeriod}`;
+  // --- Update global leaderboard ---
+  const globalLeaderboardId = `global_all_${period}`;
   const globalRef = doc(db, "group_leaderboards", globalLeaderboardId, "members", userId);
-  
+
   await setDoc(globalRef, {
     userId,
     displayName,
@@ -129,17 +124,14 @@ export async function saveAttempt({
   }, { merge: true });
   console.log("✅ Global leaderboard updated:", globalLeaderboardId);
 
-  console.log("=== SaveAttempt Complete ===");
   return attemptRef.id;
 }
 
 /**
- * Optionally ensure user is in the group members array
+ * Utility: ensure user exists in group.members
  */
 export async function ensureUserInGroup(groupId, userId) {
   if (!groupId || !userId) return;
   const ref = doc(db, "groups", groupId);
-  await updateDoc(ref, {
-    memberIds: arrayUnion(userId),
-  });
+  await updateDoc(ref, { memberIds: arrayUnion(userId) });
 }

@@ -1,80 +1,112 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    /// Public profile (any signed-in user can read)
-  match /users/{userId} {
-  allow read: if request.auth != null;  // any signed-in user can read
-  allow write: if request.auth != null && request.auth.uid == userId;
-  }
-
-
-        // ----------------------
-    // Friend requests
+    // ----------------------
+    // Helper functions
+    // ----------------------
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return request.auth != null &&
+             (request.auth.token.admin == true ||
+              request.auth.token.role == 'admin' ||
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+    // ----------------------
+    // Users (public profile)
+    // ----------------------
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId);
+    }
+    // ----------------------
+    // Friend requests (pending)
     // ----------------------
     match /friend_requests/{requestId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isAuthenticated();
     }
-    
-
     // ----------------------
-    // Scores (individual test attempts)
+    // Friendships (accepted)
+    // ----------------------
+    match /friendships/{friendshipId} {
+      allow read, write: if isAuthenticated();
+    }
+    // ----------------------
+    // Scores (individual quiz attempts)
     // ----------------------
     match /scores/{docId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null 
-                   && request.auth.uid == request.resource.data.userId;
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false; // Only Cloud Functions may update
     }
-
     // ----------------------
     // Test Attempts
     // ----------------------
     match /test_attempts/{attemptId} {
-      allow create: if request.auth != null 
-                    && request.resource.data.userId == request.auth.uid;
-      allow read: if request.auth != null 
-                  && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow update, delete: if false; // Only Cloud Functions
     }
-
     // ----------------------
-    // User Ranks (per-scope leaderboard entries)
+    // User Ranks - FIXED: Allow users to update their own ranks
     // ----------------------
-    match /userRanks/{rankId} {
-      allow read: if request.auth != null;
-      allow write: if false; // aggregation-only, client cannot write
+    match /user_ranks/{userId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && userId == request.auth.uid;
+      allow delete: if false; // Cloud Functions only
     }
-
     // ----------------------
-    // Leaderboards (read-only)
+    // Group Leaderboards - FIXED: Allow users to update their own entries
     // ----------------------
-    match /leaderboards/{leaderboardId} {
-      allow read: if request.auth != null;
-      allow write: if false; // read-only to clients
+    match /group_leaderboards/{leaderboardId} {
+      allow read: if isAuthenticated();
+      allow write: if false; // Cloud Functions only for leaderboard metadata
+      
+      match /members/{userId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() && userId == request.auth.uid;
+        allow delete: if false; // Cloud Functions only
+      }
     }
-         // ----------------------
-    // Group for seperate security
     // ----------------------
-     match /contexts/{contextType}/items/{contextId}/groups/{groupId} {
-    allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
-    allow read: if request.auth != null && request.auth.uid in resource.data.memberIds;
-    allow update, delete: if request.auth != null && request.auth.uid == resource.data.ownerId;
-   }
-
+    // Flat Groups
     // ----------------------
-    // Generic Contexts (school, group, district, upazila, division, global)
-    // ----------------------
-    match /contexts/{contextType}/items/{contextId} {
-      // Metadata of each context (e.g. name, createdBy, scope)
-      allow read: if request.auth != null;
-      allow write: if request.auth != null; 
+    match /groups/{groupId} {
+      allow read: if isAuthenticated();
+      // Users can create groups only for themselves as owner
+      allow create: if isAuthenticated() && request.resource.data.ownerId == request.auth.uid;
+      // Update/Delete: only group owner or admin
+      allow update, delete: if isAdmin() ||
+        (isAuthenticated() && resource.data.ownerId == request.auth.uid);
+      // Self-removal from memberIds
+      allow update: if isAuthenticated() && (request.auth.uid in resource.data.memberIds);
     }
-
     // ----------------------
-    // Subcollections under contexts (teams, scores, members, etc.)
+    // Administrative Collections
     // ----------------------
-    match /contexts/{contextType}/items/{contextId}/{subCol}/{docId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+    match /schools/{schoolId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+    match /unions/{unionId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+    match /upazilas/{upazilaId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+    match /districts/{districtId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+    match /divisions/{divisionId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
   }
 }

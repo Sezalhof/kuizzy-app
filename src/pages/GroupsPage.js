@@ -1,21 +1,12 @@
 // src/pages/GroupsPage.js
 import React, { useEffect, useState, useCallback } from "react";
-import {
-  collection,
-  getDocs,
-  query,
-  where,
-  doc,
-  deleteDoc,
-  updateDoc,
-} from "firebase/firestore";
+import { collection, getDocs, query, where, doc, deleteDoc, updateDoc } from "firebase/firestore";
 import { Link, useNavigate } from "react-router-dom";
 import { db } from "../firebase";
 import useAuth from "../hooks/useAuth";
 import { useUserProfile } from "../hooks/useUserProfile";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
 import GroupCreator from "../components/group/GroupCreator";
-import Leaderboard from "../components/Leaderboard";
 
 export default function GroupsPage() {
   const navigate = useNavigate();
@@ -28,7 +19,6 @@ export default function GroupsPage() {
   const [error, setError] = useState("");
   const [showGroupModal, setShowGroupModal] = useState(false);
 
-  // Fetch all groups where the current user is a member
   const fetchGroups = useCallback(async () => {
     if (!validUid || authLoading || profileLoading) return;
 
@@ -87,7 +77,6 @@ export default function GroupsPage() {
     fetchGroups();
   }, [fetchGroups]);
 
-  // Delete a group
   const handleDeleteGroup = async (groupId) => {
     if (!window.confirm("Are you sure you want to delete this group?")) return;
     try {
@@ -98,7 +87,6 @@ export default function GroupsPage() {
     }
   };
 
-  // Leave a group
   const handleLeaveGroup = async (groupId, currentMembers) => {
     if (!window.confirm("Leave this group?")) return;
     try {
@@ -157,7 +145,7 @@ export default function GroupsPage() {
             </button>
             <GroupCreator
               onClose={() => setShowGroupModal(false)}
-              onCreated={fetchGroups} // Fetch immediately after creation
+              onCreated={fetchGroups}
             />
           </div>
         </div>
@@ -196,48 +184,45 @@ export default function GroupsPage() {
               </div>
 
               <div className="flex flex-wrap gap-2 mt-2">
-  <Link
-    to={`/group-quiz/${group.id}`}
-    className="bg-green-600 text-white text-sm px-3 py-1 rounded hover:bg-green-700"
-  >
-    📝 Take A Test
-  </Link>
+                <Link
+                  to={`/group-quiz/${group.id}`}
+                  className="bg-green-600 text-white text-sm px-3 py-1 rounded hover:bg-green-700"
+                >
+                  📝 Take A Test
+                </Link>
 
-  <Link
-    to={`/group-members/${group.id}`}
-    className="bg-yellow-500 text-white text-sm px-3 py-1 rounded hover:bg-yellow-600"
-  >
-    🛡️ Show Members
-  </Link>
+                <Link
+                  to={`/group-members/${group.id}`}
+                  className="bg-yellow-500 text-white text-sm px-3 py-1 rounded hover:bg-yellow-600"
+                >
+                  🛡️ Show Members
+                </Link>
 
-  <Link
-    to={`/group-leaderboard/${group.id}`}
-    className="bg-purple-600 text-white text-sm px-3 py-1 rounded hover:bg-purple-700"
-  >
-    🏆 Leaderboard
-  </Link>
+                <Link
+                  to={`/group-leaderboard/${group.id}`}
+                  className="bg-purple-600 text-white text-sm px-3 py-1 rounded hover:bg-purple-700"
+                >
+                  🏆 Leaderboard
+                </Link>
 
-  {group.ownerId === validUid && (
-    <button
-      onClick={() => handleDeleteGroup(group.id)}
-      className="bg-red-600 text-white text-sm px-3 py-1 rounded hover:bg-red-700"
-    >
-      🗑️ Delete Group
-    </button>
-  )}
+                {group.ownerId === validUid && (
+                  <button
+                    onClick={() => handleDeleteGroup(group.id)}
+                    className="bg-red-600 text-white text-sm px-3 py-1 rounded hover:bg-red-700"
+                  >
+                    🗑️ Delete Group
+                  </button>
+                )}
 
-  {group.ownerId !== validUid && group.memberIds?.includes(validUid) && (
-    <button
-      onClick={() => handleLeaveGroup(group.id, group.memberIds)}
-      className="bg-gray-600 text-white text-sm px-3 py-1 rounded hover:bg-gray-700"
-    >
-      🚪 Leave Group
-    </button>
-  )}
-</div>
-
-
-              <Leaderboard scope="group" groupId={group.id} />
+                {group.ownerId !== validUid && group.memberIds?.includes(validUid) && (
+                  <button
+                    onClick={() => handleLeaveGroup(group.id, group.memberIds)}
+                    className="bg-gray-600 text-white text-sm px-3 py-1 rounded hover:bg-gray-700"
+                  >
+                    🚪 Leave Group
+                  </button>
+                )}
+              </div>
             </div>
           ))
         )}

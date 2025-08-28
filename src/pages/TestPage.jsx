@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from "react";
 import { useUserProfile } from "../hooks/useUserProfile";
 import useAuth from "../hooks/useAuth";
-import { saveAttempt } from '../utils/saveAttemptAndLeaderboard';
+import { saveAttempt } from "../utils/saveAttemptAndLeaderboard";
 import TestList from "../components/tests/TestList";
 import TestCart from "../components/tests/TestCart";
 import TestPlayer from "../components/tests/TestPlayer";
@@ -10,8 +10,8 @@ import { useAggregatedLeaderboard } from "../hooks/useAggregatedLeaderboard";
 import { useLocation } from "react-router-dom";
 
 const ALL_GRADES = [
-  "Class 3", "Class 4", "Class 5", "Class 6", "Class 7", "Class 8",
-  "Class 9", "Class 10", "Class 11", "Class 12"
+  "Class 3","Class 4","Class 5","Class 6","Class 7","Class 8",
+  "Class 9","Class 10","Class 11","Class 12"
 ];
 
 const dummyTests = [
@@ -25,26 +25,14 @@ const dummyTests = [
       { id: "q2", text: "What is 10 / 2?", options: ["3", "4", "5", "6"], correct: 2 },
     ],
   },
-  {
-    id: "t2",
-    title: "Science Intro",
-    grade: "Class 6",
-    duration: 1200,
-    questions: [],
-  },
-  {
-    id: "t3",
-    title: "History 101",
-    grade: "Class 7",
-    duration: 1000,
-    questions: [],
-  },
+  { id: "t2", title: "Science Intro", grade: "Class 6", duration: 1200, questions: [] },
+  { id: "t3", title: "History 101", grade: "Class 7", duration: 1000, questions: [] },
 ];
 
 export default function TestPage() {
   const { user } = useAuth();
-  const { profile, loading: profileLoading, error: profileError } = useUserProfile(user?.uid);
-  const location = useLocation(); // get state from router
+  const { profile, loading: profileLoading } = useUserProfile(user?.uid);
+  const location = useLocation();
 
   const [selectedGrade, setSelectedGrade] = useState("Class 6");
   const [tests, setTests] = useState([]);
@@ -52,7 +40,7 @@ export default function TestPage() {
   const [playingTestId, setPlayingTestId] = useState(null);
   const { refreshLeaderboard } = useAggregatedLeaderboard();
 
-  // Use groupId from location state (passed from ContextPage)
+  // groupId only comes from location (GroupPage) or profile (if user permanently belongs to a group)
   const groupId = location.state?.groupId ?? profile?.groupId ?? null;
 
   useEffect(() => {
@@ -62,8 +50,7 @@ export default function TestPage() {
   }, [profileLoading, profile]);
 
   useEffect(() => {
-    const filtered = dummyTests.filter((t) => t.grade === selectedGrade);
-    setTests(filtered);
+    setTests(dummyTests.filter((t) => t.grade === selectedGrade));
   }, [selectedGrade]);
 
   const handleAddToCart = (test) => {
@@ -77,98 +64,79 @@ export default function TestPage() {
 
   const handlePlayTest = (testId) => setPlayingTestId(testId);
 
-  // Updated handleTestComplete function for TestPage.jsx
+  // --- MAIN SAVE HANDLER ---
+  const handleTestComplete = async (
+    testId, score, totalQuestions, userAnswers, startedAt, finishedAt
+  ) => {
+    if (!user || !profile) return;
+    const test = cart.find((t) => t.id === testId);
+    if (!test) return;
 
-// Updated TestPage.jsx with proper groupId handling
+    // ensure groupId is not mistaken for schoolId
+    let properGroupId = groupId;
+    if (properGroupId && properGroupId === profile?.schoolId) {
+      console.log("⚠️ groupId == schoolId → skipping group leaderboard");
+      properGroupId = null;
+    }
 
-const handleTestComplete = async (
-  testId,
-  score,
-  totalQuestions,
-  userAnswers,
-  startedAt,
-  finishedAt
-) => {
-  if (!user || !profile) return;
+    console.log("=== TestPage Debug ===");
+    console.log("Original groupId:", groupId);
+    console.log("Profile schoolId:", profile?.schoolId);
+    console.log("Final properGroupId:", properGroupId);
+    console.log("=======================");
 
-  const test = cart.find((t) => t.id === testId);
-  if (!test) return;
+    try {
+      const payload = {
+        userId: user.uid,
+        displayName: profile.displayName ?? profile.name ?? "Unknown",
+        photoURL: profile.photoURL ?? null,
+        testId: test.id,
+        score: Number(score) || 0,
+        totalQuestions: Number(totalQuestions) || 0,
+        userAnswers: userAnswers ?? {},
+        startedAt: startedAt ?? new Date(),
+        finishedAt: finishedAt ?? new Date(),
+        testDurationSec: test.duration,
 
-  // DETERMINE THE PROPER GROUP ID
-  // Option 1: If you have a proper group document ID from location state or profile
-  let properGroupId = location.state?.groupId || profile?.groupId || null;
-  
-  // Option 2: If the groupId is actually a school name, convert it to a proper ID
-  // or set it to null to skip group leaderboards
-  if (properGroupId && properGroupId === profile?.schoolId) {
-    console.log("GroupId is same as schoolId, treating as school-based group");
-    // You can either:
-    // A) Use a normalized version: properGroupId = normalizeId(properGroupId, "group");
-    // B) Or skip group leaderboards entirely: properGroupId = null;
-    properGroupId = null; // For now, skip group leaderboards to avoid confusion
-  }
+        // GROUP (may be null if not in group context)
+        groupId: properGroupId,
 
-  console.log("=== TestPage Debug ===");
-  console.log("Original groupId from location/profile:", location.state?.groupId || profile?.groupId);
-  console.log("Profile schoolId:", profile?.schoolId);
-  console.log("Final properGroupId to use:", properGroupId);
-  console.log("=======================");
+        // always store hierarchy info
+        schoolId: profile.schoolId,
+        unionId: profile.unionId,
+        upazilaId: profile.upazilaId,
+        districtId: profile.districtId,
+        divisionId: profile.divisionId,
+      };
 
-  try {
-    const payload = {
-      userId: user.uid,
-      displayName: profile.displayName ?? profile.name ?? "Unknown",
-      photoURL: profile.photoURL ?? null,
-      testId: test.id,
-      score: Number(score) || 0,
-      totalQuestions: Number(totalQuestions) || 0,
-      userAnswers: userAnswers ?? {},
-      startedAt: startedAt ?? new Date(),
-      finishedAt: finishedAt ?? new Date(),
-      testDurationSec: test.duration,
-      
-      // Use the proper group ID (could be null)
-      groupId: properGroupId,
-      
-      // Store geographic info for reference
-      schoolId: profile.schoolId,
-      unionId: profile.unionId,
-      upazilaId: profile.upazilaId,
-      districtId: profile.districtId,
-      divisionId: profile.divisionId,
-    };
+      console.log("📤 Final payload being sent:", payload);
 
-    console.log("Final payload being sent:", payload);
+      const attemptId = await saveAttempt(payload);
+      console.log("✅ Attempt saved with ID:", attemptId);
 
-    const attemptId = await saveAttempt(payload);
-    console.log("Attempt saved successfully with ID:", attemptId);
+      // refresh leaderboards: pass groupId only if valid
+      refreshLeaderboard({
+        userId: user.uid,
+        schoolId: profile.schoolId,
+        groupId: properGroupId,
+        unionId: profile.unionId,
+        upazilaId: profile.upazilaId,
+        districtId: profile.districtId,
+        divisionId: profile.divisionId,
+        global: true,
+      });
 
-    // Refresh leaderboard with the same groupId
-    refreshLeaderboard({
-      userId: user.uid,
-      schoolId: profile.schoolId,
-      groupId: properGroupId,
-      unionId: profile.unionId,
-      upazilaId: profile.upazilaId,
-      districtId: profile.districtId,
-      divisionId: profile.divisionId,
-      global: true,
-    });
+      // clear cart
+      setCart((prev) => prev.filter((t) => t.id !== testId));
+      setPlayingTestId(null);
+    } catch (err) {
+      console.error("❌ Failed to save test attempt:", err);
+      alert("Failed to save test attempt. Check permissions or network.");
+    }
+  };
 
-    setCart((prev) => prev.filter((t) => t.id !== testId));
-    setPlayingTestId(null);
-  } catch (err) {
-    console.error("Failed to save test attempt:", err);
-    alert("Failed to save test attempt. Check permissions or network.");
-  }
-};
-  if (profileLoading) {
-    return <p className="p-4 text-gray-600">Loading your profile...</p>;
-  }
-
-  if (!profile) {
-    return <p className="p-4 text-red-600">User profile not found. Cannot start test.</p>;
-  }
+  if (profileLoading) return <p className="p-4 text-gray-600">Loading your profile...</p>;
+  if (!profile) return <p className="p-4 text-red-600">User profile not found. Cannot start test.</p>;
 
   return (
     <div className="p-4 max-w-5xl mx-auto">
@@ -190,19 +158,11 @@ const handleTestComplete = async (
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div>
-          <TestList
-            tests={tests}
-            onAdd={handleAddToCart}
-            selectedGrade={selectedGrade}
-          />
+          <TestList tests={tests} onAdd={handleAddToCart} selectedGrade={selectedGrade} />
         </div>
 
         <div>
-          <TestCart
-            cart={cart}
-            onRemove={handleRemoveFromCart}
-            onPlay={handlePlayTest}
-          />
+          <TestCart cart={cart} onRemove={handleRemoveFromCart} onPlay={handlePlayTest} />
         </div>
 
         <div className="md:col-span-2">
@@ -210,14 +170,7 @@ const handleTestComplete = async (
             <TestPlayer
               test={cart.find((t) => t.id === playingTestId)}
               onComplete={(score, totalQuestions, userAnswers, startedAt, finishedAt) =>
-                handleTestComplete(
-                  playingTestId,
-                  score,
-                  totalQuestions,
-                  userAnswers,
-                  startedAt,
-                  finishedAt
-                )
+                handleTestComplete(playingTestId, score, totalQuestions, userAnswers, startedAt, finishedAt)
               }
               userId={user?.uid}
               profile={profile}
