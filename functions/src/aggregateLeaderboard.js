@@ -29,11 +29,11 @@ async function aggregateLeaderboards() {
   }
 
   // Aggregate per user
-  const userStats = new Map(); // userId => { totalScore, totalTime, count, displayName, email, schoolId, teamId }
+  const userStats = new Map(); // userId => { totalScore, totalTime, count, displayName, email, schoolId, groupId }
 
   attemptsSnap.forEach(doc => {
     const data = doc.data();
-    const { userId, displayName, email, schoolId, teamId, score, remainingTime, combinedScore } = data;
+    const { userId, displayName, email, schoolId, groupId, score, remainingTime, combinedScore } = data;
     if (!userStats.has(userId)) {
       userStats.set(userId, {
         totalScore: 0,
@@ -43,7 +43,7 @@ async function aggregateLeaderboards() {
         displayName: displayName || "Unknown",
         email: email || userId,
         schoolId: schoolId || null,
-        teamId: teamId || null,
+        groupId: groupId || null,
       });
     }
 
@@ -69,7 +69,7 @@ async function aggregateLeaderboards() {
       avgRemaining,
       avgCombined,
       schoolId: stats.schoolId,
-      teamId: stats.teamId,
+      groupId: stats.groupId,
       period,
     });
   });
@@ -95,7 +95,7 @@ async function aggregateLeaderboards() {
       avgRemaining: entry.avgRemaining,
       avgCombined: entry.avgCombined,
       schoolId: entry.schoolId,
-      teamId: entry.teamId,
+      groupId: entry.groupId,
       period: entry.period,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
@@ -153,3 +153,5 @@ export const callableAggregateLeaderboard = async (data, context) => {
     return { success: false, error: err.message };
   }
 };
+
+

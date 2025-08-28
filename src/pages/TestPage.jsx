@@ -41,7 +41,7 @@ export default function TestPage() {
   const { refreshLeaderboard } = useAggregatedLeaderboard();
 
   // groupId only comes from location (GroupPage) or profile (if user permanently belongs to a group)
-  const groupId = location.state?.groupId ?? profile?.groupId ?? null;
+
 
   useEffect(() => {
     if (!profileLoading && profile?.grade && ALL_GRADES.includes(profile.grade)) {
@@ -72,21 +72,14 @@ export default function TestPage() {
     const test = cart.find((t) => t.id === testId);
     if (!test) return;
 
-    // ensure groupId is not mistaken for schoolId
-    let properGroupId = groupId;
-    if (properGroupId && properGroupId === profile?.schoolId) {
-      console.log("⚠️ groupId == schoolId → skipping group leaderboard");
-      properGroupId = null;
-    }
+    // Correct groupId: from location.state or profile.groupId
+    let currentGroupId = location.state?.groupId ?? profile?.groupId ?? null;
 
-    console.log("=== TestPage Debug ===");
-    console.log("Original groupId:", groupId);
-    console.log("Profile schoolId:", profile?.schoolId);
-    console.log("Final properGroupId:", properGroupId);
-    console.log("=======================");
+    // Do not confuse schoolId with groupId
+    if (currentGroupId && currentGroupId === profile?.schoolId) currentGroupId = null;
 
     try {
-      const payload = {
+      await saveAttempt({
         userId: user.uid,
         displayName: profile.displayName ?? profile.name ?? "Unknown",
         photoURL: profile.photoURL ?? null,
@@ -98,27 +91,22 @@ export default function TestPage() {
         finishedAt: finishedAt ?? new Date(),
         testDurationSec: test.duration,
 
-        // GROUP (may be null if not in group context)
-        groupId: properGroupId,
+        // PASS THE PROPER GROUP ID HERE
+        groupId: currentGroupId,
 
-        // always store hierarchy info
+        // Hierarchy info
         schoolId: profile.schoolId,
         unionId: profile.unionId,
         upazilaId: profile.upazilaId,
         districtId: profile.districtId,
         divisionId: profile.divisionId,
-      };
+      });
 
-      console.log("📤 Final payload being sent:", payload);
-
-      const attemptId = await saveAttempt(payload);
-      console.log("✅ Attempt saved with ID:", attemptId);
-
-      // refresh leaderboards: pass groupId only if valid
+      // Refresh leaderboards: pass groupId only if valid
       refreshLeaderboard({
         userId: user.uid,
         schoolId: profile.schoolId,
-        groupId: properGroupId,
+        groupId: currentGroupId,
         unionId: profile.unionId,
         upazilaId: profile.upazilaId,
         districtId: profile.districtId,
@@ -126,9 +114,10 @@ export default function TestPage() {
         global: true,
       });
 
-      // clear cart
+      // Clear cart and stop playing
       setCart((prev) => prev.filter((t) => t.id !== testId));
       setPlayingTestId(null);
+
     } catch (err) {
       console.error("❌ Failed to save test attempt:", err);
       alert("Failed to save test attempt. Check permissions or network.");
@@ -172,7 +161,6 @@ export default function TestPage() {
               onComplete={(score, totalQuestions, userAnswers, startedAt, finishedAt) =>
                 handleTestComplete(playingTestId, score, totalQuestions, userAnswers, startedAt, finishedAt)
               }
-              userId={user?.uid}
               profile={profile}
               profileLoading={profileLoading}
             />
