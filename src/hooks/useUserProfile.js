@@ -113,6 +113,15 @@ export function useUserProfile(uid) {
 
         if (docSnap.exists()) {
           const data = docSnap.data();
+
+          // 🔍 DEBUG LOGGING ADDED HERE
+          console.log("=== PROFILE FETCH DEBUG ===");
+          console.log("Raw Firestore data:", data);
+          console.log("data.groupId:", data.groupId);
+          console.log("data.schoolId:", data.schoolId);
+          console.log("All fields:", Object.keys(data));
+          console.log("========================");
+
           if (isProfileIncomplete(data)) {
             setRawProfile(null);
             setError("Profile incomplete");
@@ -139,6 +148,7 @@ export function useUserProfile(uid) {
           setError(null);
           setLoading(false);
         } else {
+          console.log("❌ User document does not exist!");
           setRawProfile(null);
           setError("Profile not found");
           setLoading(false);

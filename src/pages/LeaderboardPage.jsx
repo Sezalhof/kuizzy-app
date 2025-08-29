@@ -1,13 +1,10 @@
 // src/pages/LeaderboardPage.jsx
-import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { db } from "../firebase";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import useAuth from "../hooks/useAuth";
-import { useAggregatedLeaderboard } from "../hooks/useAggregatedLeaderboard";
+import { useUnifiedLeaderboard } from "../hooks/useUnifiedLeaderboard";
 import LeaderboardTable from "../components/LeaderboardTable";
-import { getTwoMonthPeriod } from '../utils/saveAttemptAndLeaderboard';
-
+import { getTwoMonthPeriod } from "../utils/saveAttemptAndLeaderboard";
 import { useLocation } from "react-router-dom";
-import { doc, getDoc } from "firebase/firestore";
 
 const SCOPES = [
   { key: "global", label: "Global" },
@@ -18,9 +15,7 @@ const SCOPES = [
   { key: "division", label: "Division" },
 ];
 
-const PAGE_SIZE = 20; // Reconciled
-const STORAGE_PREFIX = "kuizzy_leaderboard_";
-const CACHE_EXPIRATION = 1000 * 60 * 60 * 24; // 24h
+const PAGE_SIZE = 20;
 
 const SCOPE_FIELD_MAP = {
   union: "unionId",
@@ -29,34 +24,6 @@ const SCOPE_FIELD_MAP = {
   division: "divisionId",
 };
 
-// ------------------ Helpers ------------------
-function isOffPeakUSCentral() {
-  const now = new Date();
-  const utcHour = now.getUTCHours();
-  const centralHour = (utcHour + 24 - 5) % 24;
-  return centralHour >= 0 && centralHour < 6;
-}
-
-function loadCachedLeaderboard(scopeKey, userId, period, groupId = null) {
-  try {
-    const key =
-      scopeKey === "group"
-        ? `${STORAGE_PREFIX}${userId}_group_${groupId || "self"}_${period}`
-        : `${STORAGE_PREFIX}${userId}_${scopeKey}_${period}`;
-    const json = localStorage.getItem(key);
-    if (!json) return null;
-    const parsed = JSON.parse(json);
-    if (!parsed.entries) return null;
-    const age = Date.now() - (parsed.lastUpdated || 0);
-    if (age > CACHE_EXPIRATION && !isOffPeakUSCentral()) return null;
-    parsed.entries = parsed.entries.slice(0, PAGE_SIZE); // Apply PAGE_SIZE
-    return parsed;
-  } catch (e) {
-    console.warn("[LeaderboardPage] Cache parse failed", e);
-    return null;
-  }
-}
-
 // ------------------ Controls ------------------
 function LeaderboardControls({
   selectedScope,
@@ -64,7 +31,7 @@ function LeaderboardControls({
   period,
   setPeriod,
   profileData,
-  hookAvailableScopes = [],
+  availableScopes,
 }) {
   const getUnavailableScopes = () => {
     if (!profileData) return [];
@@ -73,7 +40,7 @@ function LeaderboardControls({
       if (!profileData[fieldName]) unavailable.push(scopeKey);
     });
     ["school"].forEach((scopeKey) => {
-      if (!hookAvailableScopes?.includes(scopeKey) && !unavailable.includes(scopeKey)) {
+      if (!availableScopes?.includes(scopeKey) && !unavailable.includes(scopeKey)) {
         unavailable.push(scopeKey);
       }
     });
@@ -141,20 +108,19 @@ export default function LeaderboardPage() {
   const [period, setPeriod] = useState(getTwoMonthPeriod());
   const [userProfile, setUserProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
-  const profileFetchedRef = useRef(false);
 
-  // Fetch user profile
+  // Fetch profile
   useEffect(() => {
-    if (!user || profileFetchedRef.current) {
+    if (!user) {
       setProfileLoading(false);
       return;
     }
-    profileFetchedRef.current = true;
     let mounted = true;
     (async () => {
       try {
-        const snap = await getDoc(doc(db, "users", user.uid));
-        if (mounted && snap.exists()) setUserProfile(snap.data());
+        const snap = await fetch(`/api/users/${user.uid}`);
+        const data = await snap.json();
+        if (mounted) setUserProfile(data);
       } catch {
         if (mounted) setUserProfile(null);
       } finally {
@@ -164,20 +130,9 @@ export default function LeaderboardPage() {
     return () => (mounted = false);
   }, [user]);
 
-  // Use hook for aggregated leaderboard
-  const {
-    leaderboards: aggLeaderboards,
-    loadingScopes: aggLoadingScopes,
-    errors: aggErrors,
-    period: hookPeriod,
-    setPeriod: setHookPeriod,
-    loadLeaderboardPage: aggLoadLeaderboardPage,
-    availableScopes: hookAvailableScopes,
-  } = useAggregatedLeaderboard(user?.uid || null, userProfile, null);
-
-  useEffect(() => {
-    if (hookPeriod !== period) setHookPeriod(period);
-  }, [period, hookPeriod, setHookPeriod]);
+  // Unified leaderboard hook
+  const { leaderboards, loadingScopes, errors, availableScopes, loadLeaderboardPage } =
+    useUnifiedLeaderboard(user?.uid || null, period, userProfile);
 
   const profileData = useMemo(() => {
     if (!userProfile) return null;
@@ -191,24 +146,20 @@ export default function LeaderboardPage() {
     };
   }, [userProfile]);
 
-  // Determine current scope data
+  // Determine current scope data safely
   const { scopeEntries, scopeHasMore, scopeLoading, scopeError } = useMemo(() => {
-    const cached = loadCachedLeaderboard(selectedScope, user?.uid, period);
-    if (cached) return { scopeEntries: cached.entries, scopeHasMore: false, scopeLoading: false, scopeError: null };
-    if (["global", "school", "union", "upazila", "district", "division"].includes(selectedScope)) {
-      const data = aggLeaderboards[selectedScope] || { entries: [], hasMore: true };
-      return {
-        scopeEntries: data.entries || [],
-        scopeHasMore: !!data.hasMore,
-        scopeLoading: !!aggLoadingScopes[selectedScope],
-        scopeError: aggErrors[selectedScope] || null,
-      };
-    }
-    return { scopeEntries: [], scopeHasMore: false, scopeLoading: false, scopeError: null };
-  }, [selectedScope, aggLeaderboards, aggLoadingScopes, aggErrors, user?.uid, period]);
+    const data = leaderboards?.[selectedScope] || {};
+    const entries = Array.isArray(data.entries) ? data.entries : [];
+    return {
+      scopeEntries: entries,
+      scopeHasMore: !!data.hasMore,
+      scopeLoading: !!loadingScopes?.[selectedScope],
+      scopeError: errors?.[selectedScope] || null,
+    };
+  }, [selectedScope, leaderboards, loadingScopes, errors]);
 
   const userRankInfo = useMemo(() => {
-    if (!user) return null;
+    if (!user || !Array.isArray(scopeEntries) || scopeEntries.length === 0) return null;
     const idx = scopeEntries.findIndex((e) => e.userId === user.uid);
     if (idx === -1) return null;
     const entry = scopeEntries[idx];
@@ -220,19 +171,18 @@ export default function LeaderboardPage() {
   }, [scopeEntries, user]);
 
   const handleLoadMore = useCallback(() => {
-    if (["global", "school", "union", "upazila", "district", "division"].includes(selectedScope)) {
-      aggLoadLeaderboardPage(selectedScope, true);
-    }
-  }, [selectedScope, aggLoadLeaderboardPage]);
+    loadLeaderboardPage(selectedScope, true);
+  }, [selectedScope, loadLeaderboardPage]);
 
+  // Fallback scope if unavailable
   useEffect(() => {
     if (!profileData) return;
     const isUnavailable =
       ["global", "school"].includes(selectedScope)
-        ? !hookAvailableScopes?.includes(selectedScope) && selectedScope !== "global"
+        ? !availableScopes?.includes(selectedScope) && selectedScope !== "global"
         : !profileData[SCOPE_FIELD_MAP[selectedScope]];
     if (isUnavailable) setSelectedScope("global");
-  }, [selectedScope, profileData, hookAvailableScopes]);
+  }, [selectedScope, profileData, availableScopes]);
 
   if (authLoading || profileLoading) {
     return (
@@ -246,7 +196,10 @@ export default function LeaderboardPage() {
     return (
       <div className="flex flex-col items-center justify-center h-screen space-y-4">
         <p className="text-gray-700">You must be logged in to view the leaderboard.</p>
-        <a href="/login" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+        <a
+          href="/login"
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+        >
           Go to Login
         </a>
       </div>
@@ -261,7 +214,7 @@ export default function LeaderboardPage() {
         period={period}
         setPeriod={setPeriod}
         profileData={profileData}
-        hookAvailableScopes={hookAvailableScopes}
+        availableScopes={availableScopes}
       />
 
       <UserRankCard userRankInfo={userRankInfo} />

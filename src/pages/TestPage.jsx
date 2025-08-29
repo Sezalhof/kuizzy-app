@@ -6,8 +6,9 @@ import { saveAttempt } from "../utils/saveAttemptAndLeaderboard";
 import TestList from "../components/tests/TestList";
 import TestCart from "../components/tests/TestCart";
 import TestPlayer from "../components/tests/TestPlayer";
-import { useAggregatedLeaderboard } from "../hooks/useAggregatedLeaderboard";
+import { useUnifiedLeaderboard } from "../hooks/useUnifiedLeaderboard";
 import { useLocation } from "react-router-dom";
+import { getTwoMonthPeriod } from "../utils/dateUtils";
 
 const ALL_GRADES = [
   "Class 3","Class 4","Class 5","Class 6","Class 7","Class 8",
@@ -38,10 +39,26 @@ export default function TestPage() {
   const [tests, setTests] = useState([]);
   const [cart, setCart] = useState([]);
   const [playingTestId, setPlayingTestId] = useState(null);
-  const { refreshLeaderboard } = useAggregatedLeaderboard();
 
-  // groupId only comes from location (GroupPage) or profile (if user permanently belongs to a group)
+  // 🔥 Determine current groupId
+  const currentGroupId = location.state?.groupId ?? profile?.groupId ?? null;
 
+  // Unified leaderboard hook — only need listenGroup here
+  const period = getTwoMonthPeriod();
+  const { listenGroup } = useUnifiedLeaderboard(user?.uid, period, profile);
+
+  // 🔍 DEBUGGING - check what profile + location contain
+  useEffect(() => {
+    if (profile) {
+      console.log("=== PROFILE DEBUG ===");
+      console.log("Full profile:", profile);
+      console.log("profile.groupId:", profile.groupId);
+      console.log("location.state:", location.state);
+      console.log("location.state?.groupId:", location.state?.groupId);
+      console.log("final currentGroupId:", currentGroupId);
+      console.log("===================");
+    }
+  }, [profile, location.state, currentGroupId]);
 
   useEffect(() => {
     if (!profileLoading && profile?.grade && ALL_GRADES.includes(profile.grade)) {
@@ -72,11 +89,20 @@ export default function TestPage() {
     const test = cart.find((t) => t.id === testId);
     if (!test) return;
 
-    // Correct groupId: from location.state or profile.groupId
-    let currentGroupId = location.state?.groupId ?? profile?.groupId ?? null;
+    let currentGroupIdLocal = location.state?.groupId ?? profile?.groupId ?? null;
 
-    // Do not confuse schoolId with groupId
-    if (currentGroupId && currentGroupId === profile?.schoolId) currentGroupId = null;
+    // 🔍 DEBUG before saveAttempt
+    console.log("=== SAVE ATTEMPT DEBUG ===");
+    console.log("profile.groupId:", profile.groupId);
+    console.log("location.state?.groupId:", location.state?.groupId);
+    console.log("final currentGroupId:", currentGroupIdLocal);
+    console.log("========================");
+
+    // Safety: don’t confuse schoolId with groupId
+    if (currentGroupIdLocal && currentGroupIdLocal === profile?.schoolId) {
+      console.warn("⚠️ currentGroupId matches schoolId, resetting to null");
+      currentGroupIdLocal = null;
+    }
 
     try {
       await saveAttempt({
@@ -90,11 +116,7 @@ export default function TestPage() {
         startedAt: startedAt ?? new Date(),
         finishedAt: finishedAt ?? new Date(),
         testDurationSec: test.duration,
-
-        // PASS THE PROPER GROUP ID HERE
-        groupId: currentGroupId,
-
-        // Hierarchy info
+        groupId: currentGroupIdLocal,
         schoolId: profile.schoolId,
         unionId: profile.unionId,
         upazilaId: profile.upazilaId,
@@ -102,17 +124,8 @@ export default function TestPage() {
         divisionId: profile.divisionId,
       });
 
-      // Refresh leaderboards: pass groupId only if valid
-      refreshLeaderboard({
-        userId: user.uid,
-        schoolId: profile.schoolId,
-        groupId: currentGroupId,
-        unionId: profile.unionId,
-        upazilaId: profile.upazilaId,
-        districtId: profile.districtId,
-        divisionId: profile.divisionId,
-        global: true,
-      });
+      // Refresh group leaderboard after save
+      if (currentGroupIdLocal) listenGroup(currentGroupIdLocal);
 
       // Clear cart and stop playing
       setCart((prev) => prev.filter((t) => t.id !== testId));
@@ -130,6 +143,13 @@ export default function TestPage() {
   return (
     <div className="p-4 max-w-5xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">Tests</h1>
+
+      {/* 🔍 Debug info UI */}
+      {currentGroupId && (
+        <div className="mb-4 p-2 bg-blue-100 rounded">
+          <strong>Debug:</strong> Current Group ID: {currentGroupId}
+        </div>
+      )}
 
       <div className="mb-4">
         <label htmlFor="grade-select" className="mr-2 font-semibold">Select Grade:</label>
