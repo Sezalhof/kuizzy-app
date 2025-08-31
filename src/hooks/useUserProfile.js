@@ -1,10 +1,19 @@
+// src/hooks/useUserProfile.js
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
+import { assignUserToGroup } from "../utils/groupUtils"; // ✅ added import
 
-// In-memory cache
+// -----------------------------
+// In-memory cache & localStorage
+// -----------------------------
 const profileCacheByUid = new Map();
 const LOCAL_STORAGE_KEY_PREFIX = "userProfile_";
+
+// -----------------------------
+// Debug mode toggle
+// -----------------------------
+const DEBUG = true; // set false in production
 
 export function useUserProfile(uid) {
   const [rawProfile, setRawProfile] = useState(null);
@@ -16,6 +25,7 @@ export function useUserProfile(uid) {
   const unsubscribeRef = useRef(null);
   const lastSnapshotPendingWrites = useRef(null);
   const previousUid = useRef(null);
+  const assignedRef = useRef(false); // ✅ track if user has been assigned to group
 
   const profileDataChanged = useCallback((a, b) => {
     return JSON.stringify(a) !== JSON.stringify(b);
@@ -25,7 +35,9 @@ export function useUserProfile(uid) {
     return !data || Object.keys(data).length === 0 || !data.role;
   };
 
+  // -----------------------------
   // Load from cache / localStorage instantly
+  // -----------------------------
   useEffect(() => {
     if (!uid) return;
 
@@ -51,6 +63,9 @@ export function useUserProfile(uid) {
     }
   }, [uid]);
 
+  // -----------------------------
+  // Stable profile memoization
+  // -----------------------------
   const profile = useMemo(() => {
     if (!rawProfile || !uid) return null;
 
@@ -73,6 +88,9 @@ export function useUserProfile(uid) {
     return stableProfile;
   }, [rawProfile, uid]);
 
+  // -----------------------------
+  // Snapshot listener with retry
+  // -----------------------------
   useEffect(() => {
     let mounted = true;
     if (!uid || typeof uid !== "string") return cleanup();
@@ -114,13 +132,14 @@ export function useUserProfile(uid) {
         if (docSnap.exists()) {
           const data = docSnap.data();
 
-          // 🔍 DEBUG LOGGING ADDED HERE
-          console.log("=== PROFILE FETCH DEBUG ===");
-          console.log("Raw Firestore data:", data);
-          console.log("data.groupId:", data.groupId);
-          console.log("data.schoolId:", data.schoolId);
-          console.log("All fields:", Object.keys(data));
-          console.log("========================");
+          if (DEBUG) {
+            console.log("=== PROFILE FETCH DEBUG ===");
+            console.log("Raw Firestore data:", data);
+            console.log("data.groupId:", data.groupId);
+            console.log("data.schoolId:", data.schoolId);
+            console.log("All fields:", Object.keys(data));
+            console.log("========================");
+          }
 
           if (isProfileIncomplete(data)) {
             setRawProfile(null);
@@ -145,10 +164,21 @@ export function useUserProfile(uid) {
             );
           }
 
+          // ✅ Assign user to group safely once per profile load
+          if (!assignedRef.current) {
+            assignedRef.current = true;
+            // Only assign if profile has schoolId and grade
+            if (data.schoolId && data.grade) {
+              assignUserToGroup(uid, newProfile).catch(err => {
+                if (DEBUG) console.error("Failed to assign group:", err);
+              });
+            }
+          }
+
           setError(null);
           setLoading(false);
         } else {
-          console.log("❌ User document does not exist!");
+          if (DEBUG) console.log("❌ User document does not exist!");
           setRawProfile(null);
           setError("Profile not found");
           setLoading(false);
@@ -185,9 +215,11 @@ export function useUserProfile(uid) {
     };
   }, [uid, retryCount, profileDataChanged, rawProfile]);
 
-  return useMemo(() => ({ profile, loading, error, hasProfile: !!profile }), [
-    profile,
-    loading,
-    error,
-  ]);
+  // -----------------------------
+  // Return profile
+  // -----------------------------
+  return useMemo(
+    () => ({ profile, loading, error, hasProfile: !!profile }),
+    [profile, loading, error]
+  );
 }

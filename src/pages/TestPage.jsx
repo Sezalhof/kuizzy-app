@@ -6,6 +6,7 @@ import { saveAttempt } from "../utils/saveAttemptAndLeaderboard";
 import TestList from "../components/tests/TestList";
 import TestCart from "../components/tests/TestCart";
 import TestPlayer from "../components/tests/TestPlayer";
+import GroupLeaderboard from "../components/GroupLeaderboard"; // ✅ Add this import
 import { useUnifiedLeaderboard } from "../hooks/useUnifiedLeaderboard";
 import { useLocation } from "react-router-dom";
 import { getTwoMonthPeriod } from "../utils/dateUtils";
@@ -39,13 +40,14 @@ export default function TestPage() {
   const [tests, setTests] = useState([]);
   const [cart, setCart] = useState([]);
   const [playingTestId, setPlayingTestId] = useState(null);
+  const [showLeaderboard, setShowLeaderboard] = useState(false); // ✅ Add toggle state
 
   // 🔥 Determine current groupId
   const currentGroupId = location.state?.groupId ?? profile?.groupId ?? null;
 
-  // Unified leaderboard hook — only need listenGroup here
+  // Unified leaderboard hook — ✅ FIXED parameter order
   const period = getTwoMonthPeriod();
-  const { listenGroup } = useUnifiedLeaderboard(user?.uid, period, profile);
+  const { listenGroup } = useUnifiedLeaderboard(user?.uid, profile, period);
 
   // 🔍 DEBUGGING - check what profile + location contain
   useEffect(() => {
@@ -82,9 +84,8 @@ export default function TestPage() {
   const handlePlayTest = (testId) => setPlayingTestId(testId);
 
   // --- MAIN SAVE HANDLER ---
-  const handleTestComplete = async (
-    testId, score, totalQuestions, userAnswers, startedAt, finishedAt
-  ) => {
+  // Changed to accept a single 'result' object from TestPlayer (as requested)
+  const handleTestComplete = async (testId, result) => {
     if (!user || !profile) return;
     const test = cart.find((t) => t.id === testId);
     if (!test) return;
@@ -98,7 +99,7 @@ export default function TestPage() {
     console.log("final currentGroupId:", currentGroupIdLocal);
     console.log("========================");
 
-    // Safety: don’t confuse schoolId with groupId
+    // Safety: don't confuse schoolId with groupId
     if (currentGroupIdLocal && currentGroupIdLocal === profile?.schoolId) {
       console.warn("⚠️ currentGroupId matches schoolId, resetting to null");
       currentGroupIdLocal = null;
@@ -110,11 +111,12 @@ export default function TestPage() {
         displayName: profile.displayName ?? profile.name ?? "Unknown",
         photoURL: profile.photoURL ?? null,
         testId: test.id,
-        score: Number(score) || 0,
-        totalQuestions: Number(totalQuestions) || 0,
-        userAnswers: userAnswers ?? {},
-        startedAt: startedAt ?? new Date(),
-        finishedAt: finishedAt ?? new Date(),
+        score: Number(result.rawScore) || 0,
+        totalQuestions: Number(result.totalQuestions) || 0,
+        userAnswers: result.userAnswers ?? {},
+        startedAt: result.startedAt ?? new Date(),
+        finishedAt: result.finishedAt ?? new Date(),
+        combinedScore: result.combinedScore, // ✅ now included
         testDurationSec: test.duration,
         groupId: currentGroupIdLocal,
         schoolId: profile.schoolId,
@@ -131,6 +133,9 @@ export default function TestPage() {
       setCart((prev) => prev.filter((t) => t.id !== testId));
       setPlayingTestId(null);
 
+      // ✅ Show leaderboard after completing a test
+      if (currentGroupIdLocal) setShowLeaderboard(true);
+
     } catch (err) {
       console.error("❌ Failed to save test attempt:", err);
       alert("Failed to save test attempt. Check permissions or network.");
@@ -146,8 +151,15 @@ export default function TestPage() {
 
       {/* 🔍 Debug info UI */}
       {currentGroupId && (
-        <div className="mb-4 p-2 bg-blue-100 rounded">
-          <strong>Debug:</strong> Current Group ID: {currentGroupId}
+        <div className="mb-4 p-2 bg-blue-100 rounded flex justify-between items-center">
+          <span><strong>Debug:</strong> Current Group ID: {currentGroupId}</span>
+          {/* ✅ Add leaderboard toggle button */}
+          <button
+            onClick={() => setShowLeaderboard(!showLeaderboard)}
+            className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
+          >
+            {showLeaderboard ? 'Hide' : 'Show'} Group Leaderboard
+          </button>
         </div>
       )}
 
@@ -178,9 +190,7 @@ export default function TestPage() {
           {playingTestId ? (
             <TestPlayer
               test={cart.find((t) => t.id === playingTestId)}
-              onComplete={(score, totalQuestions, userAnswers, startedAt, finishedAt) =>
-                handleTestComplete(playingTestId, score, totalQuestions, userAnswers, startedAt, finishedAt)
-              }
+              onComplete={(result) => handleTestComplete(playingTestId, result)}
               profile={profile}
               profileLoading={profileLoading}
             />
@@ -191,6 +201,15 @@ export default function TestPage() {
           )}
         </div>
       </div>
+
+      {/* ✅ ADD GROUP LEADERBOARD COMPONENT */}
+      {currentGroupId && showLeaderboard && (
+        <GroupLeaderboard 
+          groupId={currentGroupId} 
+          userProfile={profile} 
+          period={period} 
+        />
+      )}
     </div>
   );
 }

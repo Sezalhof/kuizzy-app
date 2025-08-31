@@ -1,30 +1,65 @@
 // src/hooks/useLeaderboard.js
-import { useEffect, useState, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { db } from "../firebase";
 import {
   collection,
   query,
   where,
   orderBy,
-  limit,
+  limit as firestoreLimit,
   startAfter,
   getDocs,
+  onSnapshot,
 } from "firebase/firestore";
-import { db } from "../firebase";
-import { loadFromCache, saveToCache } from "../utils/cache";
 
+// ---------------- Config ----------------
 const PAGE_SIZE = 20;
+const GLOBAL_CACHE_EXPIRATION = 1000 * 60 * 60 * 24; // 24h
+const SCOPE_CACHE_EXPIRATION = 1000 * 60 * 30; // 30min
+const DISABLE_CACHE = false;
+const DEBUG_MODE = false;
 
-export default function useLeaderboard(scopeKey, filters = {}) {
-  // scopeKey example: 'leaderboard_school_ABC_School'
-  // filters example: { school: "ABC School" }
+function getCacheKey(scopeKey, filters = {}) {
+  const filterPart = Object.entries(filters)
+    .map(([k, v]) => `${k}_${v}`)
+    .join("_");
+  return `kuizzy_leaderboard_${scopeKey}_${filterPart}`;
+}
 
-  const [data, setData] = useState([]);
+function loadCache(scopeKey, filters = {}) {
+  if (DISABLE_CACHE) return null;
+  try {
+    const key = getCacheKey(scopeKey, filters);
+    const json = localStorage.getItem(key);
+    if (!json) return null;
+    const parsed = JSON.parse(json);
+    const expiration = GLOBAL_CACHE_EXPIRATION;
+    if (Date.now() - (parsed.lastUpdated || 0) > expiration) return null;
+    return parsed.entries || null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCache(scopeKey, filters = {}, entries) {
+  if (DISABLE_CACHE) return;
+  try {
+    const key = getCacheKey(scopeKey, filters);
+    localStorage.setItem(
+      key,
+      JSON.stringify({ entries: entries.slice(0, PAGE_SIZE), lastUpdated: Date.now() })
+    );
+  } catch {}
+}
+
+// ---------------- Hook ----------------
+export default function useLeaderboard(scopeKey, filters = {}, mode = "live") {
+  const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastDoc, setLastDoc] = useState(null);
   const [hasMore, setHasMore] = useState(false);
-
-  const cacheKey = `leaderboard_${scopeKey}`;
+  const unsubscribeRef = useRef(null);
 
   const fetchPage = useCallback(
     async (startAfterDoc = null, append = false) => {
@@ -32,13 +67,8 @@ export default function useLeaderboard(scopeKey, filters = {}) {
       setError(null);
 
       try {
-        // Build query with filters + ordering + pagination
-        let q = query(
-          collection(db, "scores"),
-          orderBy("score", "desc"),
-          orderBy("timeTaken", "asc"),
-          limit(PAGE_SIZE)
-        );
+        const scoresCol = collection(db, "scores");
+        let q = query(scoresCol, orderBy("combinedScore", "desc"), orderBy("timeTaken", "asc"), orderBy("finishedAt", "desc"), firestoreLimit(PAGE_SIZE));
 
         // Apply filters
         Object.entries(filters).forEach(([field, value]) => {
@@ -53,50 +83,125 @@ export default function useLeaderboard(scopeKey, filters = {}) {
         }
 
         const snapshot = await getDocs(q);
-        const docs = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
+        let docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-        // Save last doc for next page
-        const lastVisible = snapshot.docs[snapshot.docs.length - 1];
+        // Deduplicate by userId
+        const dedupMap = new Map();
+        docs.forEach((doc) => {
+          const existing = dedupMap.get(doc.userId);
+          if (!existing || (doc.finishedAt?.toMillis?.() ?? 0) > (existing.finishedAt?.toMillis?.() ?? 0)) {
+            dedupMap.set(doc.userId, doc);
+          }
+        });
+        docs = Array.from(dedupMap.values());
 
-        setLastDoc(lastVisible);
+        // Assign rank
+        let lastScore = null,
+          lastTime = null,
+          lastRank = 0;
+        docs.sort((a, b) => {
+          if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
+          if ((a.timeTaken ?? Infinity) !== (b.timeTaken ?? Infinity)) return (a.timeTaken ?? Infinity) - (b.timeTaken ?? Infinity);
+          return (b.finishedAt?.toMillis?.() ?? 0) - (a.finishedAt?.toMillis?.() ?? 0);
+        });
+        docs.forEach((doc, idx) => {
+          if (doc.combinedScore === lastScore && doc.timeTaken === lastTime) {
+            doc.rank = lastRank;
+          } else {
+            doc.rank = idx + 1;
+            lastRank = idx + 1;
+            lastScore = doc.combinedScore;
+            lastTime = doc.timeTaken;
+          }
+        });
+
+        setEntries((prev) => (append ? [...prev, ...docs] : docs));
+        setLastDoc(snapshot.docs[snapshot.docs.length - 1]);
         setHasMore(snapshot.docs.length === PAGE_SIZE);
 
-        setData((prev) => (append ? [...prev, ...docs] : docs));
-
-        if (!append) {
-          // Save first page to cache
-          saveToCache(cacheKey, docs);
-        }
+        if (!append) saveCache(scopeKey, filters, docs);
       } catch (err) {
         setError("Failed to load leaderboard.");
       } finally {
         setLoading(false);
       }
     },
-    [cacheKey, filters]
+    [scopeKey, filters]
   );
 
-  // Load first page on mount or filters change, try cache first
+  // Initial load
   useEffect(() => {
-    const cached = loadFromCache(cacheKey);
-    if (cached) {
-      setData(cached);
+    const cached = loadCache(scopeKey, filters);
+    if (cached && mode === "cached") {
+      setEntries(cached);
       setLoading(false);
-      // Still fetch fresh data in background to update cache
-      fetchPage(null, false);
     } else {
       fetchPage();
     }
-  }, [cacheKey, fetchPage]);
+  }, [scopeKey, filters, mode, fetchPage]);
+
+  // Optional live mode
+  useEffect(() => {
+    if (mode !== "live") return;
+
+    const scoresCol = collection(db, "scores");
+    let q = query(scoresCol, orderBy("combinedScore", "desc"), orderBy("timeTaken", "asc"), orderBy("finishedAt", "desc"));
+
+    Object.entries(filters).forEach(([field, value]) => {
+      if (value != null) {
+        q = query(q, where(field, "==", value));
+      }
+    });
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      let docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+      // Deduplicate + rank
+      const dedupMap = new Map();
+      docs.forEach((doc) => {
+        const existing = dedupMap.get(doc.userId);
+        if (!existing || (doc.finishedAt?.toMillis?.() ?? 0) > (existing.finishedAt?.toMillis?.() ?? 0)) {
+          dedupMap.set(doc.userId, doc);
+        }
+      });
+      docs = Array.from(dedupMap.values());
+      docs.sort((a, b) => {
+        if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
+        if ((a.timeTaken ?? Infinity) !== (b.timeTaken ?? Infinity)) return (a.timeTaken ?? Infinity) - (b.timeTaken ?? Infinity);
+        return (b.finishedAt?.toMillis?.() ?? 0) - (a.finishedAt?.toMillis?.() ?? 0);
+      });
+      let lastScore = null,
+        lastTime = null,
+        lastRank = 0;
+      docs.forEach((doc, idx) => {
+        if (doc.combinedScore === lastScore && doc.timeTaken === lastTime) {
+          doc.rank = lastRank;
+        } else {
+          doc.rank = idx + 1;
+          lastRank = idx + 1;
+          lastScore = doc.combinedScore;
+          lastTime = doc.timeTaken;
+        }
+      });
+
+      setEntries(docs);
+    });
+
+    unsubscribeRef.current = unsubscribe;
+    return () => {
+      unsubscribeRef.current && unsubscribeRef.current();
+    };
+  }, [filters, mode]);
 
   const loadMore = () => {
-    if (lastDoc && !loading) {
-      fetchPage(lastDoc, true);
-    }
+    if (lastDoc && !loading) fetchPage(lastDoc, true);
   };
 
-  return { data, loading, error, hasMore, loadMore };
+  // Debug
+  useEffect(() => {
+    if (!DEBUG_MODE) return;
+    console.log("=== Leaderboard Debug ===", { scopeKey, filters, entries, loading, error });
+  }, [scopeKey, filters, entries, loading, error]);
+
+  return { entries, loading, error, hasMore, loadMore };
 }

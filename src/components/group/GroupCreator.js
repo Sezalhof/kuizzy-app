@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+// src/components/group/GroupCreator.js
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   collection,
   doc,
@@ -7,18 +8,23 @@ import {
   query,
   setDoc,
   where,
+  updateDoc,
+  arrayUnion
 } from "firebase/firestore";
 import { db } from "../../firebase";
 import useAuth from "../../hooks/useAuth";
 import { Button } from "../ui/button";
+import { assignUserToGroup } from "../../utils/groupUtils"; // ✅ ensure this uses real UUID
 
-export default function GroupCreator({ onClose }) {
+export default function GroupCreator({ onClose, onGroupCreated }) {
   const { user } = useAuth();
   const [groupName, setGroupName] = useState("");
   const [friends, setFriends] = useState([]);
   const [selectedFriends, setSelectedFriends] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [message, setMessage] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState(null);
+  const [successMessage, setSuccessMessage] = useState("");
   const [userProfile, setUserProfile] = useState(null);
 
   // Fetch user profile
@@ -27,12 +33,10 @@ export default function GroupCreator({ onClose }) {
       if (!user?.uid) return;
       try {
         const snap = await getDoc(doc(db, "users", user.uid));
-        if (snap.exists()) {
-          setUserProfile({ uid: user.uid, ...snap.data() });
-        }
+        if (snap.exists()) setUserProfile({ uid: user.uid, ...snap.data() });
       } catch (err) {
         console.error("[GroupCreator] Error fetching profile:", err);
-        setMessage("❌ Failed to load your profile.");
+        setError("❌ Failed to load your profile.");
       }
     };
     fetchProfile();
@@ -62,93 +66,101 @@ export default function GroupCreator({ onClose }) {
         recvSnapshot.forEach((doc) => friendIds.add(doc.data().fromId));
 
         const loaded = [];
-        for (const friendId of friendIds) {
-          const snap = await getDoc(doc(db, "users", friendId));
-          if (snap.exists()) {
-            loaded.push({ uid: friendId, ...snap.data() });
-          }
+        for (const fid of friendIds) {
+          const snap = await getDoc(doc(db, "users", fid));
+          if (snap.exists()) loaded.push({ uid: fid, ...snap.data() });
         }
         setFriends(loaded);
       } catch (err) {
         console.error("[GroupCreator] Error fetching friends:", err);
-        setMessage("❌ Failed to load friends.");
+        setError("❌ Failed to load friends.");
       }
     };
     fetchAcceptedFriends();
   }, [user?.uid]);
 
-  // Filter friends by search
-  const filteredFriends = friends.filter((f) => {
+  // Filter and sort friends by name
+  const filteredFriends = useMemo(() => {
     const term = searchTerm.toLowerCase();
-    return (
-      (f.name || "").toLowerCase().includes(term) ||
-      (f.email || "").toLowerCase().includes(term) ||
-      (f.phone || "").includes(term)
-    );
-  });
+    return friends
+      .filter((f) =>
+        (f.name || "").toLowerCase().includes(term) ||
+        (f.email || "").toLowerCase().includes(term) ||
+        (f.phone || "").includes(term)
+      )
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }, [friends, searchTerm]);
 
-  const toggleFriend = (uid) => {
+  const toggleFriend = useCallback((uid) => {
     setSelectedFriends((prev) =>
       prev.includes(uid) ? prev.filter((id) => id !== uid) : [...prev, uid]
     );
-  };
+  }, []);
 
-  // Automatic context resolution
-  const resolveContext = () => {
-    if (!userProfile) return null;
-
-    const contextMap = [
-      ["schoolId", "school"],
-      ["unionId", "union"],
-      ["upazilaId", "upazila"],
-      ["districtId", "district"],
-      ["divisionId", "division"],
-    ];
-
-    for (const [key, type] of contextMap) {
-      if (userProfile[key]) {
-        return { contextType: type, contextId: userProfile[key] };
-      }
+  // Helper to add group to a user's profile safely using arrayUnion
+  const addGroupToUser = useCallback(async (uid, groupId) => {
+    if (!uid) return;
+    try {
+      await updateDoc(doc(db, "users", uid), {
+        groups: arrayUnion(groupId),
+      });
+    } catch (err) {
+      console.error(`[GroupCreator] Failed to add group to user ${uid}:`, err);
     }
+  }, []);
 
-    return null;
-  };
+  // Handle group creation
+  const handleCreateGroup = async () => {
+    setError(null);
+    setSuccessMessage("");
 
-  const handleCreate = async () => {
     if (!groupName.trim() || selectedFriends.length === 0) {
-      setMessage("⚠️ Please enter a group name and select members.");
+      setError("⚠️ Enter group name and select at least one member.");
       return;
     }
 
-    const context = resolveContext();
-    if (!context) {
-      setMessage("⚠️ Cannot determine your context for group creation.");
+    if (!userProfile) {
+      setError("❌ User profile not loaded yet.");
       return;
     }
 
-
+    setCreating(true);
     const groupUid = crypto.randomUUID();
 
     try {
-      await setDoc(
-        doc(db, `groups/${groupUid}`),
-        {
-          id: groupUid,
-          groupUid: groupUid,
-          name: groupName,
-          ownerId: user.uid,
-          memberIds: [user.uid, ...selectedFriends],
-          createdAt: Date.now(),
+      // Create group document
+      await setDoc(doc(db, `groups/${groupUid}`), {
+        id: groupUid,
+        name: groupName.trim(),
+        ownerId: user.uid,
+        memberIds: [user.uid, ...selectedFriends],
+        createdAt: Date.now(),
+      });
+
+      // Add group to creator and friends using arrayUnion
+      await addGroupToUser(user.uid, groupUid);
+      await Promise.all(selectedFriends.map(fid => addGroupToUser(fid, groupUid)));
+
+      // ✅ Assign each user to this group properly
+      await assignUserToGroup(user.uid, { ...userProfile, groupId: groupUid, groupName: groupName.trim() });
+      await Promise.all(selectedFriends.map(async (fid) => {
+        const friendProfileSnap = await getDoc(doc(db, "users", fid));
+        if (friendProfileSnap.exists()) {
+          await assignUserToGroup(fid, { ...friendProfileSnap.data(), groupId: groupUid, groupName: groupName.trim() });
         }
-      );
-      
-      setMessage("✅ Group created successfully!");
+      }));
+
+      setSuccessMessage("✅ Group created successfully!");
       setGroupName("");
       setSelectedFriends([]);
-      onClose?.();
+
+      if (onGroupCreated) onGroupCreated(groupUid);
+      if (onClose) onClose();
     } catch (err) {
       console.error("[GroupCreator] Error creating group:", err);
-      setMessage("❌ Failed to create group. Check permissions.");
+      setError("❌ Failed to create group. Check permissions.");
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -158,12 +170,15 @@ export default function GroupCreator({ onClose }) {
         Create a Group
       </h2>
 
+      {error && <p className="text-center text-sm text-red-600 mb-2">{error}</p>}
+      {successMessage && <p className="text-center text-sm text-green-600 mb-2">{successMessage}</p>}
+
       <input
         type="text"
         placeholder="Enter group name"
         value={groupName}
         onChange={(e) => setGroupName(e.target.value)}
-        className="w-full px-3 py-2 mb-4 border rounded"
+        className="w-full px-3 py-2 mb-2 border rounded"
       />
 
       <input
@@ -171,8 +186,13 @@ export default function GroupCreator({ onClose }) {
         placeholder="🔍 Search members"
         value={searchTerm}
         onChange={(e) => setSearchTerm(e.target.value)}
-        className="w-full px-3 py-2 mb-4 border rounded"
+        className="w-full px-3 py-2 mb-2 border rounded"
       />
+
+      {/* Selected count */}
+      {selectedFriends.length > 0 && (
+        <p className="text-sm text-gray-600 mb-2">{selectedFriends.length} member(s) selected</p>
+      )}
 
       {filteredFriends.length === 0 ? (
         <p className="text-sm text-gray-500 mb-4">No members found.</p>
@@ -182,9 +202,7 @@ export default function GroupCreator({ onClose }) {
             <label
               key={friend.uid}
               className={`flex items-center gap-2 p-2 border rounded cursor-pointer ${
-                selectedFriends.includes(friend.uid)
-                  ? "bg-blue-50 border-blue-300"
-                  : ""
+                selectedFriends.includes(friend.uid) ? "bg-blue-50 border-blue-300" : ""
               }`}
             >
               <input
@@ -192,33 +210,21 @@ export default function GroupCreator({ onClose }) {
                 checked={selectedFriends.includes(friend.uid)}
                 onChange={() => toggleFriend(friend.uid)}
               />
-              {friend.photoURL && (
-                <img
-                  src={friend.photoURL}
-                  alt="avatar"
-                  className="w-8 h-8 rounded-full"
-                />
-              )}
+              {friend.photoURL && <img src={friend.photoURL} alt="avatar" className="w-8 h-8 rounded-full" />}
               <div>
                 <p className="font-medium">{friend.name || "Unnamed Member"}</p>
-                <p className="text-xs text-gray-500">
-                  {friend.email || friend.phone || "No contact info"}
-                </p>
+                <p className="text-xs text-gray-500">{friend.email || friend.phone || "No contact info"}</p>
               </div>
             </label>
           ))}
         </div>
       )}
 
-      {message && (
-        <p className="text-center text-sm text-blue-600 mb-2">{message}</p>
-      )}
-
       <div className="flex justify-end gap-3">
-        <Button onClick={handleCreate}>Create Group</Button>
+        <Button onClick={handleCreateGroup} disabled={creating}>
+          {creating ? "Creating..." : "Create Group"}
+        </Button>
       </div>
     </div>
   );
 }
-
-

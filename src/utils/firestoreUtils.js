@@ -1,7 +1,7 @@
 // src/utils/firestoreUtils.js
 import { doc, setDoc, collection, getDocs, query, orderBy, limit, addDoc } from "firebase/firestore";
 import { db } from "../firebase";
-import { getTwoMonthPeriod } from '../utils/saveAttemptAndLeaderboard';
+import { getTwoMonthPeriod } from "./dateUtils";
 
 
 // 🔹 Updates or creates a user profile

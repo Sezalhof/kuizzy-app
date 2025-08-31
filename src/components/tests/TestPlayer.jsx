@@ -1,6 +1,5 @@
 // src/components/tests/TestPlayer.jsx
-import React, { useState, useEffect } from "react";
-import { saveAttempt } from "../../utils/saveAttemptAndLeaderboard";
+import React, { useState } from "react";
 import useAuth from "../../hooks/useAuth";
 
 /**
@@ -25,9 +24,6 @@ export default function TestPlayer({ test, onComplete, profile, profileLoading }
   const questions = test?.questions || [];
   const totalQuestions = questions.length;
   const currentQuestion = questions[currentQuestionIndex];
-
-  // Determine groupId dynamically from profile
-  const currentGroupId = profile?.schoolId || profile?.groupId || null;
 
   // --- Wait for profile or auth loading
   if (authLoading || profileLoading) return <div className="p-4 text-gray-600">Loading...</div>;
@@ -59,24 +55,30 @@ export default function TestPlayer({ test, onComplete, profile, profileLoading }
     }
   };
 
- // Replace the handleFinish function in TestPlayer.jsx with this:
+  // --- Finish Handler (refactored to pass result object)
+  const handleFinish = async () => {
+    setFinished(true);
+    setPlaying(false);
 
-// Replace the handleFinish function in TestPlayer.jsx with this:
+    const finishedAt = new Date();
+    const elapsedSec = Math.max(
+      0,
+      Math.round((finishedAt.getTime() - (startedAt ?? finishedAt).getTime()) / 1000)
+    );
+    const remainingTime = Math.max(0, (test.duration ?? 900) - elapsedSec);
+    const combinedScore = Number(score || 0) + remainingTime / 60;
+    setTodayCombinedScore(combinedScore.toFixed(2));
 
-const handleFinish = async () => {
-  setFinished(true);
-  setPlaying(false);
-
-  const finishedAt = new Date();
-  const elapsedSec = Math.max(0, Math.round((finishedAt.getTime() - (startedAt ?? finishedAt).getTime()) / 1000));
-  const remainingTime = Math.max(0, (test.duration ?? 900) - elapsedSec);
-  const combinedScore = Number(score || 0) + remainingTime / 60;
-  setTodayCombinedScore(combinedScore.toFixed(2));
-
-  // DON'T save here - let TestPage handle the saving
-  // Just call onComplete with the results
-  onComplete?.(score, totalQuestions, userAnswers, startedAt, finishedAt);
-};
+    // ✅ Pass result object instead of raw params
+    onComplete?.({
+      rawScore: score,
+      totalQuestions,
+      userAnswers,
+      startedAt,
+      finishedAt,
+      combinedScore,
+    });
+  };
 
   // --- UI Rendering ---
   if (!playing) {

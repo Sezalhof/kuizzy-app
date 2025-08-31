@@ -1,12 +1,17 @@
-// src/hooks/useUnifiedLeaderboard.js
+// src/hooks/useUnifiedLeaderboard.js - DEBUG VERSION
 import { useState, useEffect, useCallback, useRef } from "react";
 import { db } from "../firebase";
-import { collection, getDocs, onSnapshot, query, where } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  onSnapshot,
+  query,
+  orderBy,
+  where,
+  limit as firestoreLimit,
+} from "firebase/firestore";
 
-// ------------------ Constants ------------------
-const STORAGE_PREFIX = "kuizzy_leaderboard_";
-const GLOBAL_CACHE_EXPIRATION = 1000 * 60 * 60 * 24; // 24h
-const GROUP_CACHE_EXPIRATION = 1000 * 60 * 30; // 30 min
+const DEBUG_MODE = true;
 const PAGE_SIZE = 20;
 
 const SCOPE_FIELD_MAP = {
@@ -16,227 +21,288 @@ const SCOPE_FIELD_MAP = {
   upazila: "upazilaId",
   district: "districtId",
   division: "divisionId",
+  group: "groupId",
 };
 
-// ------------------ Helpers ------------------
-function getCacheKey(scope, userId, period, idValue = null) {
-  return idValue
-    ? `${STORAGE_PREFIX}${userId}_${scope}_${idValue}_${period}`
-    : `${STORAGE_PREFIX}${userId}_${scope}_${period}`;
+function sanitizeId(id) {
+  if (!id) return "";
+  return String(id).trim();
 }
 
-function loadCache(scope, userId, period, idValue = null) {
-  try {
-    const key = getCacheKey(scope, userId, period, idValue);
-    const json = localStorage.getItem(key);
-    if (!json) return null;
-    const parsed = JSON.parse(json);
-    const expiration = scope === "group" ? GROUP_CACHE_EXPIRATION : GLOBAL_CACHE_EXPIRATION;
-    if (Date.now() - (parsed.lastUpdated || 0) > expiration) return null;
-    console.log(`[DEBUG] Loaded cache for ${scope} (${idValue || "none"}):`, parsed.entries);
-    return parsed.entries?.slice(0, PAGE_SIZE) || null;
-  } catch (err) {
-    console.error("[DEBUG] Failed to load cache:", err);
-    return null;
-  }
-}
-
-function saveCache(scope, userId, period, entries, idValue = null) {
-  try {
-    const key = getCacheKey(scope, userId, period, idValue);
-    localStorage.setItem(
-      key,
-      JSON.stringify({ entries: entries.slice(0, PAGE_SIZE), lastUpdated: Date.now() })
-    );
-    console.log(`[DEBUG] Saved cache for ${scope} (${idValue || "none"}), entries:`, entries.slice(0, PAGE_SIZE));
-  } catch (err) {
-    console.error("[DEBUG] Failed to save cache:", err);
-  }
-}
-
-// ------------------ Hook ------------------
-export function useUnifiedLeaderboard(userId, userProfile, period, mode = "cached") {
+export function useUnifiedLeaderboard(userId, userProfile, periodInput, mode = "live") {
+  const normalizedPeriod = typeof periodInput === "string" ? periodInput : periodInput?.label || periodInput?.value || "";
+  
   const [leaderboards, setLeaderboards] = useState({});
   const [loadingScopes, setLoadingScopes] = useState({});
   const [errors, setErrors] = useState({});
   const [availableScopes, setAvailableScopes] = useState([]);
   const groupListenersRef = useRef({});
 
-  // ------------------ Fetch single scope ------------------
+  // Test function to check what's in the database
+  const debugDatabase = useCallback(async () => {
+    if (!DEBUG_MODE) return;
+    
+    console.log("=== DATABASE DEBUG ===");
+    console.log("Period:", normalizedPeriod);
+    console.log("User Profile:", userProfile);
+    
+    try {
+      // First, let's see ALL documents in scores collection
+      const allScoresQuery = query(collection(db, "scores"));
+      const allScoresSnapshot = await getDocs(allScoresQuery);
+      
+      console.log("Total documents in scores collection:", allScoresSnapshot.size);
+      
+      const allDocs = [];
+      allScoresSnapshot.forEach(doc => {
+        allDocs.push({ id: doc.id, ...doc.data() });
+      });
+      
+      console.log("All documents:", allDocs);
+      
+      // Check for documents with the current period
+      const periodDocs = allDocs.filter(doc => doc.twoMonthPeriod === normalizedPeriod);
+      console.log(`Documents with period ${normalizedPeriod}:`, periodDocs);
+      
+      // Check for documents with the user's group ID
+      const groupDocs = allDocs.filter(doc => doc.groupId === userProfile?.groupId);
+      console.log(`Documents with groupId ${userProfile?.groupId}:`, groupDocs);
+      
+      // Check for documents with both period and group ID
+      const periodAndGroupDocs = allDocs.filter(doc => 
+        doc.twoMonthPeriod === normalizedPeriod && doc.groupId === userProfile?.groupId
+      );
+      console.log(`Documents with both period and group:`, periodAndGroupDocs);
+      
+    } catch (error) {
+      console.error("Database debug error:", error);
+    }
+  }, [normalizedPeriod, userProfile]);
+
+  // Run debug check when component mounts
+  useEffect(() => {
+    if (DEBUG_MODE && userProfile) {
+      debugDatabase();
+    }
+  }, [debugDatabase, userProfile]);
+
   const fetchScope = useCallback(
-    async (scopeKey) => {
-      if (!userId || !period) return;
-
-      console.log("[DEBUG] fetchScope called for:", scopeKey);
-
-      const field = SCOPE_FIELD_MAP[scopeKey];
-      const idValue = field ? userProfile?.[field] : null;
-
-      if (field && !idValue) {
-        const msg = "Scope not available";
-        setErrors((prev) => ({ ...prev, [scopeKey]: msg }));
-        setLoadingScopes((prev) => ({ ...prev, [scopeKey]: false }));
-        console.warn("[DEBUG]", msg, scopeKey);
+    async (scopeKey, append = false, scopeId = null, limit = PAGE_SIZE) => {
+      if (!userId || !normalizedPeriod) {
+        console.log("Missing userId or period:", { userId, normalizedPeriod });
         return;
       }
 
-      const cached = loadCache(scopeKey, userId, period, idValue);
-      if (cached) {
-        setLeaderboards((prev) => ({ ...prev, [scopeKey]: { entries: cached } }));
-        setLoadingScopes((prev) => ({ ...prev, [scopeKey]: false }));
-        if (mode === "cached") return;
+      const field = SCOPE_FIELD_MAP[scopeKey];
+      const rawIdValue = scopeId ?? (field ? userProfile?.[field] : null);
+      
+      console.log(`=== FETCH SCOPE: ${scopeKey} ===`);
+      console.log(`Field: ${field}, Raw ID: ${rawIdValue}`);
+      console.log(`Period: ${normalizedPeriod}`);
+
+      if (field && !rawIdValue && scopeKey !== "global") {
+        console.log(`Scope ${scopeKey} not available - missing field value`);
+        setErrors(prev => ({ ...prev, [scopeKey]: "Scope not available" }));
+        setLoadingScopes(prev => ({ ...prev, [scopeKey]: false }));
+        return;
       }
 
       try {
-        setLoadingScopes((prev) => ({ ...prev, [scopeKey]: true }));
-
-        let collectionRef;
-        if (scopeKey === "global") {
-          collectionRef = collection(db, "leaderboards", "global", "entries");
-        } else {
-          collectionRef = collection(db, "leaderboards", scopeKey, idValue, "entries");
+        setLoadingScopes(prev => ({ ...prev, [scopeKey]: true }));
+        
+        const scoresCollection = collection(db, "scores");
+        
+        // Build query step by step
+        let queryConstraints = [
+          where("twoMonthPeriod", "==", normalizedPeriod)
+        ];
+        
+        // Add scope-specific filter if needed
+        if (scopeKey !== "global" && field && rawIdValue) {
+          queryConstraints.push(where(field, "==", rawIdValue));
         }
+        
+        // Add ordering - BUT ONLY if we have the right indexes
+        // For now, let's try without ordering to see if we can get data
+        console.log("Query constraints:", queryConstraints);
+        
+        const q = query(scoresCollection, ...queryConstraints);
+        
+        const snapshot = await getDocs(q);
+        console.log(`Query result for ${scopeKey}:`, snapshot.size, "documents");
+        
+        let entries = [];
+        snapshot.forEach(doc => {
+          entries.push({ ...doc.data(), id: doc.id });
+        });
+        
+        console.log(`Raw entries for ${scopeKey}:`, entries);
 
-        const snapshot = await getDocs(collectionRef);
-        const entries = snapshot.docs.map((d) => d.data());
-        console.log(`[DEBUG] Fetched ${entries.length} entries for ${scopeKey}`);
-
+        // Manual sorting (since we removed orderBy temporarily)
         entries.sort((a, b) => {
           if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
-          if (a.timeTaken !== b.timeTaken) return a.timeTaken - b.timeTaken;
-          return a.timeMillis - b.timeMillis;
+          if ((a.timeTaken ?? Infinity) !== (b.timeTaken ?? Infinity))
+            return (a.timeTaken ?? Infinity) - (b.timeTaken ?? Infinity);
+          return (b.finishedAt?.toMillis?.() ?? 0) - (a.finishedAt?.toMillis?.() ?? 0);
         });
 
-        setLeaderboards((prev) => ({ ...prev, [scopeKey]: { entries, hasMore: false } }));
-        saveCache(scopeKey, userId, period, entries, idValue);
-      } catch (err) {
-        console.error(`[DEBUG] Error fetching ${scopeKey}:`, err);
-        setErrors((prev) => ({ ...prev, [scopeKey]: err.message || "Failed to load leaderboard." }));
+        // Deduplicate by userId (keep latest)
+        const dedupMap = new Map();
+        entries.forEach(entry => {
+          const existing = dedupMap.get(entry.userId);
+          if (!existing || (entry.finishedAt?.toMillis?.() ?? 0) > (existing.finishedAt?.toMillis?.() ?? 0)) {
+            dedupMap.set(entry.userId, entry);
+          }
+        });
+        entries = Array.from(dedupMap.values());
+
+        // Re-sort after dedup
+        entries.sort((a, b) => {
+          if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
+          if ((a.timeTaken ?? Infinity) !== (b.timeTaken ?? Infinity))
+            return (a.timeTaken ?? Infinity) - (b.timeTaken ?? Infinity);
+          return (b.finishedAt?.toMillis?.() ?? 0) - (a.finishedAt?.toMillis?.() ?? 0);
+        });
+
+        // Assign rank
+        entries.forEach((entry, idx) => {
+          entry.rank = idx + 1;
+        });
+
+        console.log(`Final entries for ${scopeKey}:`, entries);
+
+        // Update state based on scope type
+        if (scopeKey === "group") {
+          const groupKey = sanitizeId(rawIdValue);
+          setLeaderboards(prev => ({
+            ...prev,
+            group: {
+              ...prev.group,
+              [groupKey]: { entries, hasMore: false }
+            }
+          }));
+        } else {
+          setLeaderboards(prev => ({
+            ...prev,
+            [scopeKey]: { entries, hasMore: false }
+          }));
+        }
+
+      } catch (error) {
+        console.error(`Error fetching ${scopeKey}:`, error);
+        setErrors(prev => ({ ...prev, [scopeKey]: error.message }));
       } finally {
-        setLoadingScopes((prev) => ({ ...prev, [scopeKey]: false }));
+        setLoadingScopes(prev => ({ ...prev, [scopeKey]: false }));
       }
     },
-    [userId, userProfile, period, mode]
+    [userId, userProfile, normalizedPeriod]
   );
 
-  // ------------------ Initialize available scopes ------------------
+  // Initialize available scopes
   useEffect(() => {
     if (!userProfile) return;
+    
     const scopes = Object.keys(SCOPE_FIELD_MAP).filter(
-      (k) => !SCOPE_FIELD_MAP[k] || userProfile[SCOPE_FIELD_MAP[k]]
+      k => !SCOPE_FIELD_MAP[k] || userProfile[SCOPE_FIELD_MAP[k]]
     );
+    
+    console.log("Available scopes:", scopes);
     setAvailableScopes(scopes);
-    console.log("[DEBUG] Available scopes:", scopes);
-    scopes.forEach(fetchScope);
+    
+    // Fetch each scope
+    scopes.forEach(scope => {
+      console.log(`Fetching scope: ${scope}`);
+      fetchScope(scope);
+    });
   }, [userProfile, fetchScope]);
 
-  // ------------------ Group leaderboard ------------------
-  const listenGroup = useCallback(
-    (groupId) => {
-      if (!userId || !period || !groupId || groupListenersRef.current[groupId]) return;
+  const listenGroup = useCallback((groupId) => {
+    if (!userId || !normalizedPeriod || !groupId) {
+      console.log("Cannot listen to group - missing params:", { userId, normalizedPeriod, groupId });
+      return;
+    }
 
-      console.log("[DEBUG] listenGroup called for:", groupId);
+    const groupKey = sanitizeId(groupId);
+    
+    if (groupListenersRef.current[groupKey]) {
+      console.log(`Already listening to group ${groupId}`);
+      return;
+    }
 
-      const cached = loadCache("group", userId, period, groupId);
-      if (cached) {
-        setLeaderboards((prev) => ({
-          ...prev,
-          group: { ...prev.group, [groupId]: { entries: cached, hasMore: false } },
-        }));
-      }
+    console.log(`Setting up listener for group: ${groupId}`);
 
-      setLoadingScopes((prev) => ({
-        ...prev,
-        group: { ...prev.group, [groupId]: true },
-      }));
-
+    try {
       const groupQuery = query(
-        collection(db, "test_attempts"),
-        where("groupId", "==", groupId),
-        where("twoMonthPeriod", "==", period)
+        collection(db, "scores"),
+        where("twoMonthPeriod", "==", normalizedPeriod),
+        where("groupId", "==", groupId)
       );
 
       const unsubscribe = onSnapshot(
         groupQuery,
         (snapshot) => {
-          console.log(`[DEBUG] Snapshot received for group ${groupId}: ${snapshot.docs.length} docs`);
-          const entries = snapshot.docs.map((doc) => ({
-            ...doc.data(),
-            combinedScore: doc.data().combinedScore ?? doc.data().score ?? 0,
-            timeTaken: doc.data().timeTaken ?? doc.data().time ?? 9999,
-            timeMillis: doc.data().timeMillis ?? 0,
-          }));
+          console.log(`Live update for group ${groupId}: ${snapshot.size} documents`);
+          
+          let entries = [];
+          snapshot.forEach(doc => {
+            entries.push({ ...doc.data(), id: doc.id });
+          });
+
+          // Process entries (dedup, sort, rank)
+          const dedupMap = new Map();
+          entries.forEach(entry => {
+            const existing = dedupMap.get(entry.userId);
+            if (!existing || (entry.finishedAt?.toMillis?.() ?? 0) > (existing.finishedAt?.toMillis?.() ?? 0)) {
+              dedupMap.set(entry.userId, entry);
+            }
+          });
+          entries = Array.from(dedupMap.values());
 
           entries.sort((a, b) => {
             if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
-            if (a.timeTaken !== b.timeTaken) return a.timeTaken - b.timeTaken;
-            return a.timeMillis - b.timeMillis;
+            if ((a.timeTaken ?? Infinity) !== (b.timeTaken ?? Infinity))
+              return (a.timeTaken ?? Infinity) - (b.timeTaken ?? Infinity);
+            return (b.finishedAt?.toMillis?.() ?? 0) - (a.finishedAt?.toMillis?.() ?? 0);
           });
 
-          setLeaderboards((prev) => ({
-            ...prev,
-            group: { ...prev.group, [groupId]: { entries: entries.slice(0, PAGE_SIZE), hasMore: false } },
-          }));
+          entries.forEach((entry, idx) => {
+            entry.rank = idx + 1;
+          });
 
-          console.log(`[DEBUG] Updated group leaderboard for ${groupId}:`, entries.slice(0, PAGE_SIZE));
-          saveCache("group", userId, period, entries, groupId);
+          console.log(`Processed entries for group ${groupId}:`, entries);
 
-          setLoadingScopes((prev) => ({
+          setLeaderboards(prev => ({
             ...prev,
-            group: { ...prev.group, [groupId]: false },
+            group: {
+              ...prev.group,
+              [groupKey]: { entries, hasMore: false }
+            }
           }));
         },
-        (err) => {
-          console.error(`[DEBUG] Snapshot error for group ${groupId}:`, err);
-          setErrors((prev) => ({
-            ...prev,
-            group: { ...prev.group, [groupId]: "Failed to load group leaderboard." },
-          }));
-          setLoadingScopes((prev) => ({
-            ...prev,
-            group: { ...prev.group, [groupId]: false },
-          }));
+        (error) => {
+          console.error(`Error listening to group ${groupId}:`, error);
         }
       );
 
-      groupListenersRef.current[groupId] = unsubscribe;
+      groupListenersRef.current[groupKey] = unsubscribe;
+      return () => unsubscribe();
 
-      const timer = setTimeout(() => {
-        if (groupListenersRef.current[groupId]) {
-          groupListenersRef.current[groupId]();
-          delete groupListenersRef.current[groupId];
-        }
-      }, GROUP_CACHE_EXPIRATION);
-
-      return () => clearTimeout(timer);
-    },
-    [userId, period]
-  );
+    } catch (error) {
+      console.error(`Error setting up group listener:`, error);
+    }
+  }, [userId, normalizedPeriod]);
 
   const stopListeningGroup = useCallback((groupId) => {
-    if (groupListenersRef.current[groupId]) {
-      console.log("[DEBUG] stopListeningGroup called for:", groupId);
-      groupListenersRef.current[groupId]();
-      delete groupListenersRef.current[groupId];
-      setLeaderboards((prev) => {
-        const newGroup = { ...prev.group };
-        delete newGroup[groupId];
-        return { ...prev, group: newGroup };
-      });
+    const groupKey = sanitizeId(groupId);
+    if (groupListenersRef.current[groupKey]) {
+      groupListenersRef.current[groupKey]();
+      delete groupListenersRef.current[groupKey];
     }
   }, []);
 
-  useEffect(() => {
-    return () => {
-      Object.values(groupListenersRef.current).forEach((u) => u());
-      groupListenersRef.current = {};
-    };
-  }, []);
-
   const loadLeaderboardPage = useCallback(
-    (scopeKey) => {
-      console.log("[DEBUG] loadLeaderboardPage called for:", scopeKey);
-      fetchScope(scopeKey);
+    (scopeKey, append = false, scopeId = null, limit = PAGE_SIZE) => {
+      fetchScope(scopeKey, append, scopeId, limit);
     },
     [fetchScope]
   );

@@ -1,7 +1,7 @@
 // src/components/LeaderboardTable.jsx
 import React, { useState, useEffect, useMemo } from "react";
 import { db } from "../firebase";
-import { doc, getDocs, query, where, collection } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 
 export default function LeaderboardTable({
   data = [],
@@ -26,7 +26,7 @@ export default function LeaderboardTable({
 
       if (!missingUids.length) return;
 
-      const BATCH_SIZE = 10; // Firestore 'in' query limit
+      const BATCH_SIZE = 10;
       const batches = [];
 
       for (let i = 0; i < missingUids.length; i += BATCH_SIZE) {
@@ -45,7 +45,6 @@ export default function LeaderboardTable({
               newDetails[doc.id] = { name: username || name || "Unknown", email: email || doc.id };
             });
 
-            // For UIDs not found, mark as Unknown
             batch.forEach((uid) => {
               if (!newDetails[uid]) newDetails[uid] = { name: "Unknown", email: uid };
             });
@@ -63,19 +62,18 @@ export default function LeaderboardTable({
     fetchUserDetails();
   }, [data]);
 
-  // Sort leaderboard: avgCombined descending, avgTime ascending
+  // Use rank from entries if available
   const sortedData = useMemo(() => {
     if (!data) return [];
-    return [...data]
-      .map((entry) => ({
-        ...entry,
-        score: entry.avgCombined ?? entry.totalCombinedAverage ?? 0,
-        timeTaken: entry.avgTime ?? entry.time ?? 9999,
-      }))
-      .sort((a, b) => b.score - a.score || a.timeTaken - b.timeTaken);
+    return [...data].map((entry, index) => ({
+      ...entry,
+      score: entry.avgCombined ?? entry.totalCombinedAverage ?? entry.combinedScore ?? 0,
+      timeTaken: entry.avgTime ?? entry.time ?? entry.timeTaken ?? 9999,
+      rank: entry.rank ?? index + 1, // fallback
+    }));
   }, [data]);
 
-  // Determine top-N entries with pinned user if needed
+  // Top-N + pinned current user
   const displayData = useMemo(() => {
     if (!sortedData.length) return [];
     let topEntries = topN ? sortedData.slice(0, topN) : sortedData;
@@ -87,9 +85,13 @@ export default function LeaderboardTable({
     return topEntries;
   }, [sortedData, highlightUserId, topN]);
 
-  if (loading) return <div className="p-4 text-center text-gray-500 animate-pulse">Loading leaderboard...</div>;
+  if (loading)
+    return (
+      <div className="p-4 text-center text-gray-500 animate-pulse">Loading leaderboard...</div>
+    );
   if (error) return <div className="p-4 text-center text-red-600">{error}</div>;
-  if (!sortedData.length) return <div className="p-4 text-center text-gray-500">No leaderboard data yet.</div>;
+  if (!sortedData.length)
+    return <div className="p-4 text-center text-gray-500">No leaderboard data yet.</div>;
 
   return (
     <div className="overflow-hidden shadow ring-1 ring-black ring-opacity-5 rounded-lg w-full">
@@ -99,29 +101,40 @@ export default function LeaderboardTable({
             <TableHeader title="Rank" />
             <TableHeader title="Name" />
             <TableHeader title="Email" />
+            <TableHeader title="School" />
+            <TableHeader title="Grade" />
             <TableHeader title="Score" />
             <TableHeader title="Time Taken (s)" />
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
           {displayData.map((entry, index) => {
-            const userInfo = userDetails[entry.userId] || { name: entry.name || entry.username || "Loading...", email: entry.email || entry.userId };
+            const userInfo = userDetails[entry.userId] || {
+              name: entry.displayName || entry.name || "Loading...",
+              email: entry.email || entry.userId,
+            };
             const isCurrent = entry.userId === highlightUserId;
             const isPinned = entry.pinned;
             return (
               <tr
                 key={entry.id || index}
                 className={`
-                  ${index === 0 ? "bg-yellow-100" : index === 1 ? "bg-gray-100" : index === 2 ? "bg-orange-100" : ""}
+                  ${entry.rank === 1 ? "bg-yellow-100" : entry.rank === 2 ? "bg-gray-100" : entry.rank === 3 ? "bg-orange-100" : ""}
                   ${isCurrent ? "ring-2 ring-blue-400 font-semibold" : ""}
                   ${isPinned ? "bg-blue-50 italic" : ""}
                 `}
                 aria-current={isCurrent ? "row" : undefined}
               >
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-800">{index + 1}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-800">
+                  {entry.rank}
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{userInfo.name}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{userInfo.email}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-green-700">{entry.score.toFixed(2)} pts</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{entry.school || "-"}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{entry.grade || "-"}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-green-700">
+                  {entry.score.toFixed(2)} pts
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{entry.timeTaken}</td>
               </tr>
             );
@@ -130,7 +143,12 @@ export default function LeaderboardTable({
       </table>
       {hasMore && onLoadMore && (
         <div className="p-4 text-center">
-          <button onClick={onLoadMore} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Load More</button>
+          <button
+            onClick={onLoadMore}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            Load More
+          </button>
         </div>
       )}
     </div>
