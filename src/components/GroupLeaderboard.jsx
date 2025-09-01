@@ -1,4 +1,5 @@
-// src/components/GroupLeaderboard.jsx
+// Updated GroupLeaderboard.jsx with better debugging and fixes
+
 import React, { useState, useEffect, useMemo } from "react";
 import { collection, query, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
@@ -6,13 +7,15 @@ import useAuth from "../hooks/useAuth";
 import LoadingSpinner from "./ui/LoadingSpinner";
 import { useUnifiedLeaderboard } from "../hooks/useUnifiedLeaderboard";
 
-const DEBUG_MODE = true; // set true to enable debug logs
+const DEBUG_MODE = false; // set false to disable debug logs
 
 export default function GroupLeaderboard({ groupIds = [], userProfile, period }) {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState("live"); // 'live' or 'cached'
+  const [activeTab, setActiveTab] = useState("live");
 
-  const groupId = groupIds[0]; // Only one group per table now
+  // 🔧 FIX 1: Better groupId handling
+  const groupId = groupIds && groupIds.length > 0 ? groupIds[0] : 
+                  userProfile?.groupId || userProfile?.group || null;
 
   const {
     leaderboards,
@@ -28,9 +31,28 @@ export default function GroupLeaderboard({ groupIds = [], userProfile, period })
     activeTab === "cached" ? "cached" : "live"
   );
 
+  // Enhanced debugging
+  useEffect(() => {
+    if (!DEBUG_MODE) return;
+    
+    console.log("=== GROUPLEADERBOARD PROPS DEBUG ===");
+    console.log("Received groupIds:", groupIds);
+    console.log("Computed groupId:", groupId);
+    console.log("userProfile.groupId:", userProfile?.groupId);
+    console.log("userProfile.group:", userProfile?.group);
+    console.log("period:", period);
+    console.log("activeTab:", activeTab);
+    console.log("=====================================");
+  }, [groupIds, groupId, userProfile, period, activeTab]);
+
   // Listen for live updates
   useEffect(() => {
-    if (!groupId || activeTab !== "live") return;
+    if (!groupId || activeTab !== "live") {
+      if (DEBUG_MODE) {
+        console.log("Skipping live listener:", { groupId, activeTab });
+      }
+      return;
+    }
 
     if (DEBUG_MODE) {
       console.log(`GroupLeaderboard: Starting listener for group ${groupId}`);
@@ -55,30 +77,7 @@ export default function GroupLeaderboard({ groupIds = [], userProfile, period })
     }
   }, [groupId, loadLeaderboardPage, activeTab]);
 
-  // 🔹 Temporary collection debug
-  useEffect(() => {
-    const testCollections = async () => {
-      console.log("=== TESTING COLLECTION NAMES ===");
-
-      try {
-        const scoresQuery = query(collection(db, "scores"));
-        const scoresSnapshot = await getDocs(scoresQuery);
-        console.log("Documents in 'scores' collection:", scoresSnapshot.size);
-
-        const scoreQuery = query(collection(db, "score"));
-        const scoreSnapshot = await getDocs(scoreQuery);
-        console.log("Documents in 'score' collection:", scoreSnapshot.size);
-
-        const testScoresQuery = query(collection(db, "test_scores"));
-        const testScoresSnapshot = await getDocs(testScoresQuery);
-        console.log("Documents in 'test_scores' collection:", testScoresSnapshot.size);
-      } catch (error) {
-        console.error("Collection test error:", error);
-      }
-    };
-
-    if (groupId) testCollections();
-  }, [groupId]);
+  // Collection debug removed - main functionality working
 
   // Get entries for this group
   const entries = useMemo(() => {
@@ -145,10 +144,22 @@ export default function GroupLeaderboard({ groupIds = [], userProfile, period })
     console.log("================================");
   }, [groupId, entries.length, loading, error, userProfile, period]);
 
+  // 🔧 FIX 2: Better error messaging
   if (!groupId) {
     return (
       <div className="mt-6 max-w-4xl mx-auto p-4">
-        <div className="text-center text-gray-500">No group ID provided for leaderboard.</div>
+        <div className="bg-yellow-100 border-l-4 border-yellow-500 p-4">
+          <div className="text-center text-yellow-700">
+            <h3 className="font-bold mb-2">No Group ID Found</h3>
+            <p className="mb-2">Unable to determine group ID from:</p>
+            <ul className="text-left text-sm">
+              <li>• groupIds prop: {JSON.stringify(groupIds)}</li>
+              <li>• userProfile.groupId: {userProfile?.groupId || 'MISSING'}</li>
+              <li>• userProfile.group: {userProfile?.group || 'MISSING'}</li>
+            </ul>
+            <p className="mt-2 text-xs">Please ensure the user has a groupId field in their profile.</p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -163,7 +174,7 @@ export default function GroupLeaderboard({ groupIds = [], userProfile, period })
 
   return (
     <div className="mt-6 max-w-4xl mx-auto p-4">
-      <h2 className="text-2xl font-bold text-center text-blue-700 mb-4">🏆 Group Leaderboard</h2>
+      <h2 className="text-2xl font-bold text-center text-blue-700 mb-4">Group Leaderboard</h2>
       <p className="text-center text-gray-600 mb-4">Group ID: {groupId}</p>
       <p className="text-center text-gray-600 mb-4">Period: {period}</p>
 
@@ -185,18 +196,35 @@ export default function GroupLeaderboard({ groupIds = [], userProfile, period })
 
       {error && <div className="text-red-600 mb-2">{error}</div>}
       {loading && <LoadingSpinner />}
+      
       {!loading && entries.length === 0 && (
         <div className="text-center">
-          <p className="text-gray-500 mb-2">No leaderboard data yet for this group.</p>
-          <p className="text-sm text-gray-400">
-            Make sure users have completed tests and are assigned to this group ID.
-          </p>
+          <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-4">
+            <p className="text-blue-700 mb-2 font-semibold">No leaderboard data found</p>
+            <p className="text-blue-600 text-sm mb-2">
+              This could be due to:
+            </p>
+            <ul className="text-blue-600 text-sm text-left">
+              <li>• No test attempts for period "{period}"</li>
+              <li>• No users assigned to group "{groupId}"</li>
+              <li>• Period mismatch in database</li>
+            </ul>
+          </div>
+          
           {DEBUG_MODE && (
             <div className="mt-4 p-3 bg-gray-100 rounded text-left text-xs">
-              <p><strong>Debug Info:</strong></p>
-              <p>Group ID: {groupId}</p>
-              <p>Period: {period}</p>
-              <p>Leaderboards state: {JSON.stringify(leaderboards, null, 2)}</p>
+              <p className="font-bold mb-2">Debug Info:</p>
+              <div className="space-y-1">
+                <p>Group ID: {groupId}</p>
+                <p>Period: {period}</p>
+                <p>Active Tab: {activeTab}</p>
+                <p>Loading: {String(loading)}</p>
+                <p>Error: {error || 'None'}</p>
+                <p>Leaderboards keys: {Object.keys(leaderboards || {}).join(', ')}</p>
+                {leaderboards?.group && (
+                  <p>Group keys: {Object.keys(leaderboards.group).join(', ')}</p>
+                )}
+              </div>
             </div>
           )}
         </div>

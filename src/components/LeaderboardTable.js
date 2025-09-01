@@ -3,6 +3,8 @@ import React, { useState, useEffect, useMemo } from "react";
 import { db } from "../firebase";
 import { collection, getDocs, query, where } from "firebase/firestore";
 
+const DEBUG = true; // set to false in production
+
 export default function LeaderboardTable({
   data = [],
   highlightUserId,
@@ -15,7 +17,7 @@ export default function LeaderboardTable({
 }) {
   const [userDetails, setUserDetails] = useState({});
 
-  // Batch fetch missing usernames
+  // Batch fetch missing usernames/emails
   useEffect(() => {
     if (!fetchMissingNames || !data?.length) return;
 
@@ -62,16 +64,35 @@ export default function LeaderboardTable({
     fetchUserDetails();
   }, [data]);
 
-  // Use rank from entries if available
+  // 🔍 Debug: log raw data
+  useEffect(() => {
+    if (!DEBUG) return;
+    console.log("📥 [LeaderboardTable] raw data in:", data);
+  }, [data]);
+
+  // ✅ Normalize fields: score/time/rank/school/grade
   const sortedData = useMemo(() => {
-    if (!data) return [];
-    return [...data].map((entry, index) => ({
+    return (data || []).map((entry, index) => ({
       ...entry,
-      score: entry.avgCombined ?? entry.totalCombinedAverage ?? entry.combinedScore ?? 0,
-      timeTaken: entry.avgTime ?? entry.time ?? entry.timeTaken ?? 9999,
-      rank: entry.rank ?? index + 1, // fallback
+      score: Number(
+        entry.combinedScore ??
+          entry.avgCombined ??
+          entry.totalCombinedAverage ??
+          entry.score ??
+          0
+      ),
+      timeTaken: Number(entry.timeTaken ?? entry.time ?? entry.avgTime ?? 9999),
+      rank: entry.rank ?? index + 1,
+      school: entry.school ?? entry.schoolName ?? entry.schoolId ?? "-",
+      grade: entry.grade ?? entry.class ?? entry.className ?? "-",
     }));
   }, [data]);
+
+  // 🔍 Debug: log normalized data
+  useEffect(() => {
+    if (!DEBUG) return;
+    console.log("✅ [LeaderboardTable] normalized data:", sortedData);
+  }, [sortedData]);
 
   // Top-N + pinned current user
   const displayData = useMemo(() => {
@@ -87,15 +108,25 @@ export default function LeaderboardTable({
 
   if (loading)
     return (
-      <div className="p-4 text-center text-gray-500 animate-pulse">Loading leaderboard...</div>
+      <div className="p-4 text-center text-gray-500 animate-pulse">
+        Loading leaderboard...
+      </div>
     );
-  if (error) return <div className="p-4 text-center text-red-600">{error}</div>;
+  if (error)
+    return <div className="p-4 text-center text-red-600">{error}</div>;
   if (!sortedData.length)
-    return <div className="p-4 text-center text-gray-500">No leaderboard data yet.</div>;
+    return (
+      <div className="p-4 text-center text-gray-500">
+        No leaderboard data yet.
+      </div>
+    );
 
   return (
     <div className="overflow-hidden shadow ring-1 ring-black ring-opacity-5 rounded-lg w-full">
-      <table className="min-w-full divide-y divide-gray-200" aria-label="Leaderboard Table">
+      <table
+        className="min-w-full divide-y divide-gray-200"
+        aria-label="Leaderboard Table"
+      >
         <thead className="bg-gray-50">
           <tr>
             <TableHeader title="Rank" />
@@ -115,9 +146,10 @@ export default function LeaderboardTable({
             };
             const isCurrent = entry.userId === highlightUserId;
             const isPinned = entry.pinned;
+
             return (
               <tr
-                key={entry.id || index}
+                key={entry.id || `${entry.userId}-${entry.finishedAt?.seconds || index}`}
                 className={`
                   ${entry.rank === 1 ? "bg-yellow-100" : entry.rank === 2 ? "bg-gray-100" : entry.rank === 3 ? "bg-orange-100" : ""}
                   ${isCurrent ? "ring-2 ring-blue-400 font-semibold" : ""}
@@ -128,14 +160,24 @@ export default function LeaderboardTable({
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-800">
                   {entry.rank}
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{userInfo.name}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{userInfo.email}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{entry.school || "-"}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{entry.grade || "-"}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  {userInfo.name}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  {userInfo.email}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  {entry.school}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  {entry.grade}
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-green-700">
                   {entry.score.toFixed(2)} pts
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{entry.timeTaken}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                  {entry.timeTaken}
+                </td>
               </tr>
             );
           })}
@@ -156,5 +198,7 @@ export default function LeaderboardTable({
 }
 
 const TableHeader = ({ title }) => (
-  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{title}</th>
+  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+    {title}
+  </th>
 );
