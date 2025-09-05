@@ -1,8 +1,16 @@
 // src/utils/firestoreUtils.js
-import { doc, setDoc, collection, getDocs, query, orderBy, limit, addDoc } from "firebase/firestore";
+import { 
+  doc, 
+  setDoc, 
+  collection, 
+  getDocs, 
+  query, 
+  orderBy, 
+  limit as firestoreLimit, 
+  addDoc 
+} from "firebase/firestore";
 import { db } from "../firebase";
 import { getTwoMonthPeriod } from "./dateUtils";
-
 
 // 🔹 Updates or creates a user profile
 export async function updateUserProfile(uid, profileData) {
@@ -21,7 +29,7 @@ export async function fetchTopScores(limitCount = 10) {
     collection(db, "scores"),
     orderBy("score", "desc"),
     orderBy("timeTaken", "asc"),
-    limit(limitCount)
+    firestoreLimit(limitCount)
   );
   const snapshot = await getDocs(q);
   return snapshot.docs.map((doc) => ({
@@ -32,15 +40,9 @@ export async function fetchTopScores(limitCount = 10) {
 
 // 🔹 Save a quiz score (rules-compliant, group-ready)
 export async function saveQuizScore(uid, score, timeTaken, groupId = null) {
-  // Replace with actual currentUser.uid in frontend
-  const currentUser = uid; // Placeholder for auth check
-  if (uid !== currentUser) {
-    throw new Error("Cannot save score for another user");
-  }
+  const twoMonthPeriod = getTwoMonthPeriod();
 
   try {
-    const twoMonthPeriod = getTwoMonthPeriod();
-
     await addDoc(collection(db, "scores"), {
       uid,
       score,
@@ -71,7 +73,7 @@ export async function getAllSchoolsGrouped({ forceRefresh = false } = {}) {
   }
 
   if (schoolsCache.isLoading) {
-    while (schoolsCache.isLoading) await new Promise(r => setTimeout(r, 100));
+    while (schoolsCache.isLoading) await new Promise((r) => setTimeout(r, 100));
     return schoolsCache.data;
   }
 
@@ -107,7 +109,6 @@ export async function getAllSchoolsGrouped({ forceRefresh = false } = {}) {
 
     schoolsCache.data = grouped;
     schoolsCache.timestamp = Date.now();
-
     return grouped;
   } catch (error) {
     console.error("❌ Error grouping schools:", error);

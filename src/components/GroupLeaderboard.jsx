@@ -1,163 +1,151 @@
-// Updated GroupLeaderboard.jsx with better debugging and fixes
-
-import React, { useState, useEffect, useMemo } from "react";
-import { collection, query, getDocs } from "firebase/firestore";
-import { db } from "../firebase";
+// GroupLeaderboard.jsx - FIXED: Use sanitized data, prevent duplicates
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import useAuth from "../hooks/useAuth";
 import LoadingSpinner from "./ui/LoadingSpinner";
 import { useUnifiedLeaderboard } from "../hooks/useUnifiedLeaderboard";
 
-const DEBUG_MODE = false; // set false to disable debug logs
+const DEBUG = false; // Set to true only for debugging
 
-export default function GroupLeaderboard({ groupIds = [], userProfile, period }) {
+export default function GroupLeaderboard({ 
+  groupId, 
+  userProfile,
+  period,
+  className = ""
+}) {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("live");
+  
+  // Use refs to track initialization and prevent duplicate calls
+  const listenerCleanupRef = useRef(null);
+  const lastListenerGroupRef = useRef(null);
 
-  // 🔧 FIX 1: Better groupId handling
-  const groupId = groupIds && groupIds.length > 0 ? groupIds[0] : 
-                  userProfile?.groupId || userProfile?.group || null;
+  // ✅ FIXED: Resolve group ID using sanitized profile data
+  const resolvedGroupId = useMemo(() => {
+    // If groupId is explicitly provided, use it (trusted from upstream)
+    if (groupId && typeof groupId === 'string' && groupId.trim().length > 0) {
+      return groupId.trim();
+    }
+    
+    // Safety check: ensure userProfile exists and has sanitized groups
+    if (!userProfile || !userProfile.groups || !Array.isArray(userProfile.groups)) {
+      if (DEBUG) {
+        console.log('No valid profile or groups array available');
+      }
+      return null;
+    }
+    
+    // Use first sanitized group from profile
+    return userProfile.groups[0] || null;
+  }, [groupId, userProfile]);
+
+  // ✅ FIXED: Simplified validation since upstream data is now sanitized
+  const isValidGroup = useMemo(() => {
+    return !!(resolvedGroupId && 
+             typeof resolvedGroupId === 'string' && 
+             resolvedGroupId.length > 8); // Basic length check for UUIDs
+  }, [resolvedGroupId]);
 
   const {
     leaderboards,
     loadingScopes,
     errors,
     listenGroup,
-    stopListeningGroup,
     loadLeaderboardPage,
+    isReady,
   } = useUnifiedLeaderboard(
-    user?.uid || null,
+    user?.uid,
     userProfile,
     period,
     activeTab === "cached" ? "cached" : "live"
   );
 
-  // Enhanced debugging
-  useEffect(() => {
-    if (!DEBUG_MODE) return;
-    
-    console.log("=== GROUPLEADERBOARD PROPS DEBUG ===");
-    console.log("Received groupIds:", groupIds);
-    console.log("Computed groupId:", groupId);
-    console.log("userProfile.groupId:", userProfile?.groupId);
-    console.log("userProfile.group:", userProfile?.group);
-    console.log("period:", period);
-    console.log("activeTab:", activeTab);
-    console.log("=====================================");
-  }, [groupIds, groupId, userProfile, period, activeTab]);
+  // Memoized tab change handlers to prevent unnecessary re-renders
+  const handleTabChange = useCallback((tab) => {
+    setActiveTab(tab);
+  }, []);
 
-  // Listen for live updates
+  // Setup live listener for the resolved group with proper cleanup
   useEffect(() => {
-    if (!groupId || activeTab !== "live") {
-      if (DEBUG_MODE) {
-        console.log("Skipping live listener:", { groupId, activeTab });
+    if (!resolvedGroupId || !isValidGroup || !isReady || activeTab !== "live") {
+      // Clean up any existing listener if conditions aren't met
+      if (listenerCleanupRef.current) {
+        listenerCleanupRef.current();
+        listenerCleanupRef.current = null;
+        lastListenerGroupRef.current = null;
       }
       return;
     }
 
-    if (DEBUG_MODE) {
-      console.log(`GroupLeaderboard: Starting listener for group ${groupId}`);
+    // Don't create a new listener if we already have one for the same group
+    if (lastListenerGroupRef.current === resolvedGroupId && listenerCleanupRef.current) {
+      return;
     }
 
-    const unsubscribe = listenGroup(groupId);
+    // Clean up existing listener before creating a new one
+    if (listenerCleanupRef.current) {
+      listenerCleanupRef.current();
+    }
+
+    // Create new listener
+    const cleanup = listenGroup(resolvedGroupId);
+    listenerCleanupRef.current = cleanup;
+    lastListenerGroupRef.current = resolvedGroupId;
+
     return () => {
-      if (DEBUG_MODE) {
-        console.log(`GroupLeaderboard: Stopping listener for group ${groupId}`);
+      if (listenerCleanupRef.current) {
+        listenerCleanupRef.current();
+        listenerCleanupRef.current = null;
+        lastListenerGroupRef.current = null;
       }
-      unsubscribe && unsubscribe();
     };
-  }, [groupId, listenGroup, activeTab]);
+  }, [resolvedGroupId, isValidGroup, isReady, activeTab, listenGroup]);
 
-  // Initial load for cached mode or fallback
+  // Load cached data when needed
   useEffect(() => {
-    if (groupId && activeTab === "cached") {
-      if (DEBUG_MODE) {
-        console.log(`GroupLeaderboard: Loading cached data for group ${groupId}`);
-      }
-      loadLeaderboardPage("group", false, groupId);
+    if (resolvedGroupId && isValidGroup && isReady && activeTab === "cached") {
+      loadLeaderboardPage("group", false, resolvedGroupId);
     }
-  }, [groupId, loadLeaderboardPage, activeTab]);
+  }, [resolvedGroupId, isValidGroup, isReady, activeTab, loadLeaderboardPage]);
 
-  // Collection debug removed - main functionality working
+  // Extract leaderboard data for the current group
+  const { entries, loading, error } = useMemo(() => {
+    const currentLoading = loadingScopes?.group;
+    const currentError = errors?.group;
 
-  // Get entries for this group
-  const entries = useMemo(() => {
-    if (DEBUG_MODE) {
-      console.log("=== GROUP LEADERBOARD ENTRIES DEBUG ===");
-      console.log("Full leaderboards state:", leaderboards);
-      console.log("Group ID:", groupId);
-      console.log("Group leaderboards:", leaderboards?.group);
+    if (!resolvedGroupId || !isValidGroup || !isReady) {
+      return { entries: [], loading: false, error: null };
     }
 
-    let groupEntries = [];
-    if (leaderboards?.group?.[groupId]?.entries) {
-      groupEntries = leaderboards.group[groupId].entries;
-    } else if (leaderboards?.group?.entries) {
-      groupEntries = leaderboards.group.entries.filter(entry => entry.groupId === groupId);
-    }
+    // Get entries from the specific group
+    const groupData = leaderboards?.group?.[resolvedGroupId];
+    const groupEntries = groupData?.entries || [];
 
-    if (DEBUG_MODE) {
-      console.log("Raw group entries:", groupEntries);
-    }
+    return {
+      entries: groupEntries,
+      loading: currentLoading,
+      error: currentError
+    };
+  }, [leaderboards, resolvedGroupId, isValidGroup, loadingScopes, errors, isReady]);
 
-    if (!Array.isArray(groupEntries)) return [];
-
-    const sorted = [...groupEntries].sort((a, b) => {
-      if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
-      if ((a.timeTaken ?? Infinity) !== (b.timeTaken ?? Infinity))
-        return (a.timeTaken ?? Infinity) - (b.timeTaken ?? Infinity);
-      return (b.finishedAt?.toMillis?.() ?? 0) - (a.finishedAt?.toMillis?.() ?? 0);
-    });
-
-    let lastScore = null;
-    let lastTime = null;
-    let lastRank = 0;
-    sorted.forEach((entry, idx) => {
-      if (entry.combinedScore === lastScore && entry.timeTaken === lastTime) {
-        entry.rank = lastRank;
-      } else {
-        entry.rank = idx + 1;
-        lastRank = idx + 1;
-        lastScore = entry.combinedScore;
-        lastTime = entry.timeTaken;
-      }
-    });
-
-    if (DEBUG_MODE) {
-      console.log("Final sorted entries:", sorted);
-    }
-
-    return sorted;
-  }, [leaderboards, groupId]);
-
-  const loading = loadingScopes?.group || loadingScopes?.group?.[groupId];
-  const error = errors?.group?.[groupId] || errors?.group;
-
-  useEffect(() => {
-    if (!DEBUG_MODE) return;
-    console.log("=== GROUP LEADERBOARD DEBUG ===");
-    console.log("groupId:", groupId);
-    console.log("entries length:", entries.length);
-    console.log("loading:", loading);
-    console.log("error:", error);
-    console.log("userProfile:", userProfile);
-    console.log("period:", period);
-    console.log("================================");
-  }, [groupId, entries.length, loading, error, userProfile, period]);
-
-  // 🔧 FIX 2: Better error messaging
-  if (!groupId) {
+  // Early returns for various states
+  if (!resolvedGroupId || !isValidGroup) {
     return (
-      <div className="mt-6 max-w-4xl mx-auto p-4">
-        <div className="bg-yellow-100 border-l-4 border-yellow-500 p-4">
-          <div className="text-center text-yellow-700">
-            <h3 className="font-bold mb-2">No Group ID Found</h3>
-            <p className="mb-2">Unable to determine group ID from:</p>
-            <ul className="text-left text-sm">
-              <li>• groupIds prop: {JSON.stringify(groupIds)}</li>
-              <li>• userProfile.groupId: {userProfile?.groupId || 'MISSING'}</li>
-              <li>• userProfile.group: {userProfile?.group || 'MISSING'}</li>
-            </ul>
-            <p className="mt-2 text-xs">Please ensure the user has a groupId field in their profile.</p>
+      <div className={`mt-6 max-w-4xl mx-auto p-4 ${className}`}>
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <div className="text-center">
+            <h3 className="font-semibold text-yellow-800 mb-2">No Valid Group Available</h3>
+            <p className="text-yellow-700 text-sm">
+              {!resolvedGroupId 
+                ? "No group ID provided and no groups found in user profile."
+                : "Group ID format appears invalid."
+              }
+            </p>
+            <div className="text-xs text-yellow-600 mt-2">
+              <div>Group ID: <code className="bg-yellow-100 px-1 rounded">{resolvedGroupId || 'null'}</code></div>
+              <div>Profile Groups: <code className="bg-yellow-100 px-1 rounded">
+                {userProfile?.groups?.join(', ') || 'None'}
+              </code></div>
+            </div>
           </div>
         </div>
       </div>
@@ -166,103 +154,188 @@ export default function GroupLeaderboard({ groupIds = [], userProfile, period })
 
   if (!userProfile) {
     return (
-      <div className="mt-6 max-w-4xl mx-auto p-4">
-        <div className="text-center text-gray-500">User profile required for leaderboard.</div>
+      <div className={`mt-6 max-w-4xl mx-auto p-4 ${className}`}>
+        <div className="text-center text-gray-500 p-4">
+          User profile required for leaderboard display.
+        </div>
+      </div>
+    );
+  }
+
+  if (!isReady) {
+    return (
+      <div className={`mt-6 max-w-4xl mx-auto p-4 ${className}`}>
+        <div className="text-center p-4">
+          <LoadingSpinner />
+          <p className="mt-2 text-gray-600">Initializing leaderboard...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="mt-6 max-w-4xl mx-auto p-4">
-      <h2 className="text-2xl font-bold text-center text-blue-700 mb-4">Group Leaderboard</h2>
-      <p className="text-center text-gray-600 mb-4">Group ID: {groupId}</p>
-      <p className="text-center text-gray-600 mb-4">Period: {period}</p>
+    <div className={`mt-6 max-w-4xl mx-auto p-4 ${className}`}>
+      <div className="text-center mb-6">
+        <h2 className="text-2xl font-bold text-blue-700 mb-2">Group Leaderboard</h2>
+        <div className="text-sm text-gray-600 space-y-1">
+          <p>
+            Group: <span className="font-mono bg-gray-100 px-2 py-1 rounded">{resolvedGroupId}</span>
+          </p>
+          <p>
+            Period: <span className="font-mono bg-gray-100 px-2 py-1 rounded">{period}</span>
+          </p>
+        </div>
+      </div>
 
-      {/* Tabs */}
-      <div className="flex justify-center gap-4 mb-4">
+      {/* Mode Toggle */}
+      <div className="flex justify-center gap-2 mb-6">
         <button
-          className={`px-4 py-2 rounded ${activeTab === "live" ? "bg-blue-500 text-white" : "bg-gray-200"}`}
-          onClick={() => setActiveTab("live")}
+          className={`px-4 py-2 rounded-md font-medium transition-colors ${
+            activeTab === "live" 
+              ? "bg-blue-600 text-white shadow" 
+              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+          }`}
+          onClick={() => handleTabChange("live")}
         >
-          Live
+          Live Updates
         </button>
         <button
-          className={`px-4 py-2 rounded ${activeTab === "cached" ? "bg-blue-500 text-white" : "bg-gray-200"}`}
-          onClick={() => setActiveTab("cached")}
+          className={`px-4 py-2 rounded-md font-medium transition-colors ${
+            activeTab === "cached" 
+              ? "bg-blue-600 text-white shadow" 
+              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+          }`}
+          onClick={() => handleTabChange("cached")}
         >
-          24h Cached
+          Cached (24h)
         </button>
       </div>
 
-      {error && <div className="text-red-600 mb-2">{error}</div>}
-      {loading && <LoadingSpinner />}
-      
-      {!loading && entries.length === 0 && (
-        <div className="text-center">
-          <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-4">
-            <p className="text-blue-700 mb-2 font-semibold">No leaderboard data found</p>
-            <p className="text-blue-600 text-sm mb-2">
-              This could be due to:
-            </p>
-            <ul className="text-blue-600 text-sm text-left">
-              <li>• No test attempts for period "{period}"</li>
-              <li>• No users assigned to group "{groupId}"</li>
-              <li>• Period mismatch in database</li>
-            </ul>
-          </div>
-          
-          {DEBUG_MODE && (
-            <div className="mt-4 p-3 bg-gray-100 rounded text-left text-xs">
-              <p className="font-bold mb-2">Debug Info:</p>
-              <div className="space-y-1">
-                <p>Group ID: {groupId}</p>
-                <p>Period: {period}</p>
-                <p>Active Tab: {activeTab}</p>
-                <p>Loading: {String(loading)}</p>
-                <p>Error: {error || 'None'}</p>
-                <p>Leaderboards keys: {Object.keys(leaderboards || {}).join(', ')}</p>
-                {leaderboards?.group && (
-                  <p>Group keys: {Object.keys(leaderboards.group).join(', ')}</p>
-                )}
-              </div>
-            </div>
-          )}
+      {/* Error Display */}
+      {error && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-red-800 font-medium">Error loading leaderboard:</p>
+          <p className="text-red-700 text-sm mt-1">{error}</p>
         </div>
       )}
 
-      {!loading && entries.length > 0 && (
-        <div className="overflow-x-auto shadow ring-1 ring-black ring-opacity-5 rounded-lg">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Rank</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class / School</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {entries.map((entry, index) => {
-                const isCurrent = user?.uid === entry.userId;
-                const rowClass = isCurrent
-                  ? "bg-blue-50 font-semibold"
-                  : index < 3
-                  ? "bg-yellow-100 font-semibold"
-                  : "";
+      {/* Loading State */}
+      {loading && (
+        <div className="text-center py-8">
+          <LoadingSpinner />
+          <p className="mt-2 text-gray-600">Loading leaderboard data...</p>
+        </div>
+      )}
 
-                return (
-                  <tr key={entry.userId || index} className={rowClass}>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">{entry.rank}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">{entry.displayName || entry.name || "Unknown"}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">{entry.grade || entry.class || "N/A"} / {entry.school || "N/A"}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center font-semibold text-green-700">{entry.combinedScore} pts</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">{entry.timeTaken}s</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      {/* Empty State */}
+      {!loading && !error && entries.length === 0 && (
+        <div className="text-center py-8">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+            <h3 className="text-lg font-semibold text-blue-800 mb-2">No Results Yet</h3>
+            <p className="text-blue-700 mb-4">
+              No test attempts found for this group and period.
+            </p>
+            <p className="text-blue-600 text-sm">
+              Group members need to complete tests to appear on the leaderboard.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Results Table */}
+      {!loading && !error && entries.length > 0 && (
+        <div className="bg-white shadow-lg rounded-lg overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Rank
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Participant
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    School/Class
+                  </th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Score
+                  </th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Time
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {entries.map((entry) => {
+                  const isCurrentUser = user?.uid === entry.userId;
+                  const isTopThree = entry.rank <= 3;
+
+                  let rowClass = "";
+                  if (isCurrentUser) rowClass = "bg-blue-50 border-l-4 border-blue-400";
+                  else if (isTopThree) rowClass = "bg-yellow-50";
+
+                  return (
+                    <tr key={entry.userId} className={rowClass}>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <span
+                            className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${
+                              entry.rank === 1
+                                ? "bg-yellow-100 text-yellow-800"
+                                : entry.rank === 2
+                                ? "bg-gray-100 text-gray-800"
+                                : entry.rank === 3
+                                ? "bg-orange-100 text-orange-800"
+                                : "bg-gray-50 text-gray-600"
+                            }`}
+                          >
+                            {entry.rank}
+                          </span>
+                          {isCurrentUser && (
+                            <span className="ml-2 text-xs text-blue-600 font-medium">YOU</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">
+                          {entry.displayName || entry.name || "Anonymous"}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <div>{entry.grade || entry.class || "N/A"}</div>
+                        <div className="text-xs text-gray-400">{entry.school || "N/A"}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <div className="text-lg font-bold text-green-600">
+                          {typeof entry.combinedScore === "number" 
+                            ? entry.combinedScore.toFixed(1) 
+                            : "0.0"}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {entry.score || 0}/{entry.totalQuestions || 0} raw
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-900">
+                        {entry.timeTaken
+                          ? `${Math.floor(entry.timeTaken / 60)}:${(entry.timeTaken % 60)
+                              .toString()
+                              .padStart(2, "0")}`
+                          : "N/A"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="bg-gray-50 px-6 py-3 text-center">
+            <p className="text-sm text-gray-600">
+              Showing {entries.length} participant{entries.length !== 1 ? "s" : ""} • Updated:{" "}
+              {activeTab === "live" ? "Real-time" : "24h cache"}
+            </p>
+          </div>
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-// src/pages/TestPage.jsx - UPDATED FOR MULTI-GROUP SUPPORT
+// src/pages/TestPage.jsx - FIXED: Use sanitized profile groups
 import React, { useState, useEffect } from "react";
 import { useUserProfile } from "../hooks/useUserProfile";
 import useAuth from "../hooks/useAuth";
@@ -8,10 +8,11 @@ import TestCart from "../components/tests/TestCart";
 import TestPlayer from "../components/tests/TestPlayer";
 import GroupLeaderboard from "../components/GroupLeaderboard";
 import { useUnifiedLeaderboard } from "../hooks/useUnifiedLeaderboard";
+import DatabaseInspector from "../components/DatabaseInspector";
 import { useLocation } from "react-router-dom";
 import { getTwoMonthPeriod } from "../utils/dateUtils";
 
-const DEBUG_MODE = true; // Enable debug logging
+const DEBUG = false; // Set to true only for debugging
 
 const ALL_GRADES = [
   "Class 3","Class 4","Class 5","Class 6","Class 7","Class 8",
@@ -35,7 +36,7 @@ const dummyTests = [
 
 export default function TestPage() {
   const { user } = useAuth();
-  const { profile, loading: profileLoading } = useUserProfile(user?.uid);
+  const { profile, loading: profileLoading, validGroups, primaryGroupId, hasGroups } = useUserProfile(user?.uid);
   const location = useLocation();
 
   const [selectedGrade, setSelectedGrade] = useState("Class 6");
@@ -43,64 +44,88 @@ export default function TestPage() {
   const [cart, setCart] = useState([]);
   const [playingTestId, setPlayingTestId] = useState(null);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
-  const [selectedGroupId, setSelectedGroupId] = useState(null); // For multi-group support
+  const [selectedGroupId, setSelectedGroupId] = useState(null);
 
-  // 🔥 Determine current groupId with enhanced logic
+  // Get correct period format
+  const period = getTwoMonthPeriod(); // Should return "2025-SepOct"
+
+  // ✅ FIXED: Use only sanitized groups from profile
+  // Determine current groupId using ONLY valid, sanitized groups
   const currentGroupId = React.useMemo(() => {
-    // Priority: location state > selected > profile primary
-    return location.state?.groupId ?? 
-           selectedGroupId ?? 
-           profile?.groupId ?? 
-           null;
-  }, [location.state?.groupId, selectedGroupId, profile?.groupId]);
+    // Priority: URL param > user selection > first valid group > null
+    if (location.state?.groupId && validGroups.includes(location.state.groupId)) {
+      return location.state.groupId;
+    }
+    
+    if (selectedGroupId && validGroups.includes(selectedGroupId)) {
+      return selectedGroupId;
+    }
+    
+    return primaryGroupId; // First valid group or null
+  }, [location.state?.groupId, selectedGroupId, validGroups, primaryGroupId]);
 
-  // Get all user groups
-  const allUserGroups = React.useMemo(() => {
-    if (!profile) return [];
-    return [...new Set([
-      profile?.groupId,
-      profile?.group,
-      ...(profile?.groups || [])
-    ].filter(Boolean))];
-  }, [profile]);
+  // ✅ FIXED: allUserGroups now uses only sanitized data
+  // Direct reference to sanitized array from profile hook
 
-  // Unified leaderboard hook with improved parameters
-  const period = getTwoMonthPeriod();
+  // Enhanced readiness check using sanitized data
+  const shouldInitializeLeaderboard = React.useMemo(() => {
+    const hasUser = !!(user && user.uid);
+    const hasProfile = !!(profile && !profileLoading);
+    const hasPeriod = !!(period);
+    
+    if (DEBUG) {
+      console.log("🔍 Leaderboard initialization check:", {
+        hasUser,
+        hasProfile,
+        hasPeriod,
+        validGroupsCount: validGroups.length,
+        shouldInit: hasUser && hasProfile && hasPeriod
+      });
+    }
+    
+    return hasUser && hasProfile && hasPeriod;
+  }, [user, profile, profileLoading, period, validGroups.length]);
+
+  // Only initialize leaderboard hook when data is ready
   const { 
     isReady, 
-    userGroups, 
-    listenGroup, 
+    initialized,
+        listenGroup, 
     leaderboards, 
     loadingScopes, 
     errors,
-    availableScopes // Add this missing variable
-  } = useUnifiedLeaderboard(user?.uid, profile, period);
+    availableScopes,
+   } = useUnifiedLeaderboard(
+    shouldInitializeLeaderboard ? user?.uid : null,
+    shouldInitializeLeaderboard ? profile : null, 
+    shouldInitializeLeaderboard ? period : null
+  );
 
-  // 🔍 ENHANCED DEBUGGING
+  // ✅ FIXED: Simplified debugging with clean data
   useEffect(() => {
-    if (profile && user?.uid) {
-      console.log("=== ENHANCED PROFILE DEBUG ===");
-      console.log("Full profile:", profile);
+    if (profile && user?.uid && DEBUG) {
+      console.log("=== CLEAN PROFILE DEBUG ===");
       console.log("User ID:", user.uid);
-      console.log("profile.groupId:", profile.groupId);
-      console.log("profile.groups:", profile.groups);
-      console.log("allUserGroups computed:", allUserGroups);
-      console.log("location.state:", location.state);
-      console.log("selectedGroupId:", selectedGroupId);
-      console.log("final currentGroupId:", currentGroupId);
-      console.log("isReady:", isReady);
-      console.log("period:", period);
-      console.log("================================");
+      console.log("Profile loaded:", !profileLoading);
+      console.log("✅ Sanitized validGroups:", validGroups);
+      console.log("✅ Primary group ID:", primaryGroupId);
+      console.log("✅ Has groups:", hasGroups);
+      console.log("Final currentGroupId:", currentGroupId);
+      console.log("Leaderboard ready:", isReady, "initialized:", initialized);
+      console.log("Period:", period);
+      console.log("===============================");
     }
-  }, [profile, user?.uid, allUserGroups, location.state, selectedGroupId, currentGroupId, isReady, period]);
+  }, [profile, user?.uid, profileLoading, validGroups, primaryGroupId, hasGroups, currentGroupId, isReady, initialized, period]);
 
   // Set default group if user has groups but none selected
   useEffect(() => {
-    if (allUserGroups.length > 0 && !selectedGroupId && !location.state?.groupId) {
-      console.log("🎯 Auto-selecting first group:", allUserGroups[0]);
-      setSelectedGroupId(allUserGroups[0]);
+    if (hasGroups && !selectedGroupId && !location.state?.groupId) {
+      if (DEBUG) {
+        console.log("🎯 Auto-selecting primary group:", primaryGroupId);
+      }
+      setSelectedGroupId(primaryGroupId);
     }
-  }, [allUserGroups, selectedGroupId, location.state?.groupId]);
+  }, [hasGroups, selectedGroupId, location.state?.groupId, primaryGroupId]);
 
   useEffect(() => {
     if (!profileLoading && profile?.grade && ALL_GRADES.includes(profile.grade)) {
@@ -123,35 +148,35 @@ export default function TestPage() {
 
   const handlePlayTest = (testId) => setPlayingTestId(testId);
 
-  // --- ENHANCED SAVE HANDLER ---
+  // Enhanced save handler with sanitized group data
   const handleTestComplete = async (testId, result) => {
     if (!user || !profile) {
       console.error("❌ Missing user or profile");
+      alert("Error: User authentication or profile data missing");
       return;
     }
     
     const test = cart.find((t) => t.id === testId);
     if (!test) {
       console.error("❌ Test not found in cart");
+      alert("Error: Test data not found");
       return;
     }
 
-    // Use current group logic
     let targetGroupId = currentGroupId;
 
-    // 🔍 ENHANCED DEBUG before saveAttempt
-    console.log("=== ENHANCED SAVE ATTEMPT DEBUG ===");
-    console.log("user.uid:", user.uid);
-    console.log("profile.groupId:", profile.groupId);
-    console.log("selectedGroupId:", selectedGroupId);
-    console.log("location.state?.groupId:", location.state?.groupId);
-    console.log("allUserGroups:", allUserGroups);
-    console.log("final targetGroupId:", targetGroupId);
-    console.log("===================================");
+    if (DEBUG) {
+      console.log("=== SAVE ATTEMPT DEBUG ===");
+      console.log("✅ Using sanitized groups only");
+      console.log("Valid groups:", validGroups);
+      console.log("Target group ID:", targetGroupId);
+      console.log("Period:", period);
+      console.log("==========================");
+    }
 
-    // Safety: don't confuse schoolId with groupId
-    if (targetGroupId && targetGroupId === profile?.schoolId) {
-      console.warn("⚠️ targetGroupId matches schoolId, resetting to null");
+    // Safety check: ensure target group is in valid groups
+    if (targetGroupId && !validGroups.includes(targetGroupId)) {
+      console.warn("⚠️ Target group ID not in valid groups, setting to null");
       targetGroupId = null;
     }
 
@@ -167,25 +192,41 @@ export default function TestPage() {
         startedAt: result.startedAt ?? new Date(),
         finishedAt: result.finishedAt ?? new Date(),
         combinedScore: result.combinedScore,
+        timeTaken: result.timeTaken || 0,
         testDurationSec: test.duration,
+        twoMonthPeriod: period,
         groupId: targetGroupId,
         schoolId: profile.schoolId,
         unionId: profile.unionId,
         upazilaId: profile.upazilaId,
         districtId: profile.districtId,
         divisionId: profile.divisionId,
+        grade: profile.grade,
+        school: profile.school || profile.schoolName,
       };
 
-      console.log("💾 Saving attempt with data:", saveData);
+      if (DEBUG) {
+        console.log("💾 Saving attempt with sanitized group data:", {
+          groupId: saveData.groupId,
+          period: saveData.twoMonthPeriod,
+          score: saveData.combinedScore
+        });
+      }
+
       await saveAttempt(saveData);
       console.log("✅ Save attempt successful");
 
-      // Refresh group leaderboard after save - for all user groups
-      if (isReady) {
-        allUserGroups.forEach(groupId => {
-          console.log(`🔄 Refreshing leaderboard for group: ${groupId}`);
-          listenGroup(groupId);
-        });
+      // Refresh leaderboards after save
+      if (isReady && initialized && hasGroups) {
+        setTimeout(() => {
+          if (DEBUG) {
+            console.log("🔄 Refreshing leaderboards for valid groups...");
+          }
+          
+          validGroups.forEach(groupId => {
+            listenGroup(groupId);
+          });
+        }, 1500);
       }
 
       // Clear cart and stop playing
@@ -193,9 +234,11 @@ export default function TestPage() {
       setPlayingTestId(null);
 
       // Show leaderboard after completing a test
-      if (targetGroupId || allUserGroups.length > 0) {
+      if (hasGroups) {
         setShowLeaderboard(true);
       }
+
+      alert("Test completed successfully! Check the leaderboard to see your ranking.");
 
     } catch (err) {
       console.error("❌ Failed to save test attempt:", err);
@@ -203,33 +246,74 @@ export default function TestPage() {
     }
   };
 
-  if (profileLoading) return <p className="p-4 text-gray-600">Loading your profile...</p>;
-  if (!profile) return <p className="p-4 text-red-600">User profile not found. Cannot start test.</p>;
-  if (!user?.uid) return <p className="p-4 text-red-600">User not authenticated.</p>;
+  // Early returns for loading states
+  if (profileLoading) {
+    return (
+      <div className="p-4 max-w-5xl mx-auto">
+        <div className="text-center py-8">
+          <div className="animate-pulse">
+            <div className="h-6 bg-gray-300 rounded mb-4 mx-auto w-48"></div>
+            <div className="h-4 bg-gray-200 rounded mb-2 mx-auto w-32"></div>
+          </div>
+          <p className="mt-4 text-gray-600">Loading your profile...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <div className="p-4 max-w-5xl mx-auto">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <h3 className="font-semibold text-red-800 mb-2">Profile Not Found</h3>
+          <p className="text-red-700">User profile not found. Cannot start test.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user?.uid) {
+    return (
+      <div className="p-4 max-w-5xl mx-auto">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <h3 className="font-semibold text-red-800 mb-2">Authentication Required</h3>
+          <p className="text-red-700">User not authenticated. Please log in to continue.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 max-w-5xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">Tests</h1>
 
-      {/* 🔧 ENHANCED DEBUG INFO AND CONTROLS */}
-      {(allUserGroups.length > 0 || currentGroupId) && (
-        <div className="mb-4 p-3 bg-blue-100 rounded">
+      {/* ✅ FIXED: Clean group info panel - no more junk IDs */}
+      {hasGroups && (
+        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded">
           <div className="flex flex-wrap items-center gap-4">
             <div>
-              <strong>Debug Info:</strong>
+              <strong>✅ Clean Group Data:</strong>
               <div className="text-sm">
                 Current Group: {currentGroupId || 'None'}
               </div>
               <div className="text-sm">
-                All Groups: {allUserGroups.join(', ') || 'None'}
+                Valid Groups ({validGroups.length}): {validGroups.join(', ')} 
+                <span className="text-green-600 ml-1">✓ Sanitized</span>
               </div>
               <div className="text-sm">
-                Ready: {isReady ? '✅' : '❌'} | Period: {period}
+                Ready: {isReady ? '✅' : '❌'} | 
+                Init: {initialized ? '✅' : '❌'} | 
+                Period: <code>{period}</code>
               </div>
+              {availableScopes && (
+                <div className="text-sm">
+                  Available Scopes: {availableScopes.join(', ')}
+                </div>
+              )}
             </div>
             
-            {/* Group Selector for multi-group users */}
-            {allUserGroups.length > 1 && (
+            {/* ✅ FIXED: Group selector shows only valid groups */}
+            {validGroups.length > 1 && (
               <div>
                 <label className="mr-2 text-sm font-medium">Select Group:</label>
                 <select
@@ -238,7 +322,7 @@ export default function TestPage() {
                   onChange={(e) => setSelectedGroupId(e.target.value || null)}
                 >
                   <option value="">-- Select Group --</option>
-                  {allUserGroups.map((groupId) => (
+                  {validGroups.map((groupId) => (
                     <option key={groupId} value={groupId}>
                       {groupId}
                     </option>
@@ -251,6 +335,7 @@ export default function TestPage() {
             <button
               onClick={() => setShowLeaderboard(!showLeaderboard)}
               className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors"
+              disabled={!hasGroups}
             >
               {showLeaderboard ? 'Hide' : 'Show'} Group Leaderboard
             </button>
@@ -277,6 +362,16 @@ export default function TestPage() {
                 .join(', ')}
             </div>
           )}
+        </div>
+      )}
+
+      {/* No groups message */}
+      {!hasGroups && (
+        <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
+          <div className="text-sm text-yellow-800">
+            <strong>No Groups Available:</strong> You are not currently assigned to any groups. 
+            Group leaderboards will not be available.
+          </div>
         </div>
       )}
 
@@ -319,8 +414,8 @@ export default function TestPage() {
         </div>
       </div>
 
-      {/* 🔧 ENHANCED GROUP LEADERBOARD COMPONENT WITH MULTI-GROUP SUPPORT */}
-      {showLeaderboard && allUserGroups.length > 0 && (
+      {/* ✅ FIXED: Group Leaderboard with clean data only */}
+      {showLeaderboard && hasGroups && (
         <div className="mt-6">
           <h2 className="text-xl font-bold mb-4">Group Leaderboards</h2>
           
@@ -334,13 +429,13 @@ export default function TestPage() {
                 groupId={currentGroupId} 
                 userProfile={profile} 
                 period={period}
-                key={`current-${currentGroupId}`} // Force re-render when group changes
+                key={`current-${currentGroupId}-${isReady}-${initialized}`}
               />
             </div>
           )}
           
-          {/* Show leaderboards for all other groups if user belongs to multiple */}
-          {allUserGroups.length > 1 && allUserGroups
+          {/* Show leaderboards for other groups if user belongs to multiple */}
+          {validGroups.length > 1 && validGroups
             .filter(groupId => groupId !== currentGroupId)
             .map(groupId => (
               <div key={groupId} className="mb-6">
@@ -351,31 +446,43 @@ export default function TestPage() {
                   groupId={groupId} 
                   userProfile={profile} 
                   period={period}
+                  key={`group-${groupId}-${isReady}-${initialized}`}
                 />
               </div>
             ))}
         </div>
       )}
 
-      {/* Debug Leaderboard Data */}
-      {showLeaderboard && isReady && DEBUG_MODE && (
+      {/* Debug section - only show if DEBUG is true */}
+      {DEBUG && showLeaderboard && isReady && initialized && hasGroups && (
         <div className="mt-6 p-4 bg-gray-100 rounded">
-          <h3 className="font-bold mb-2">🔍 Debug: Leaderboard Data</h3>
+          <h3 className="font-bold mb-2">🔍 Debug: Clean Leaderboard Data</h3>
           <div className="text-sm">
             <div><strong>Available Scopes:</strong> {availableScopes?.join(', ') || 'None'}</div>
-            <div><strong>User Groups:</strong> {userGroups?.join(', ') || 'None'}</div>
+            <div><strong>✅ Valid Groups:</strong> {validGroups.join(', ')}</div>
             <div><strong>Leaderboard Keys:</strong> {Object.keys(leaderboards).join(', ') || 'None'}</div>
+            <div><strong>Period:</strong> <code>{period}</code></div>
             {Object.entries(leaderboards).map(([scope, data]) => (
               <div key={scope}>
                 <strong>{scope}:</strong> {
                   scope === 'group' 
-                    ? Object.keys(data).map(groupId => `${groupId}(${data[groupId]?.entries?.length || 0})`).join(', ')
-                    : `${data?.entries?.length || 0} entries`
+                    ? Object.keys(data).map(groupId => `${groupId}(${data[groupId]?.entries?.length || 0}${data[groupId]?.isEmpty ? ',empty' : ''})`).join(', ')
+                    : `${data?.entries?.length || 0} entries${data?.isEmpty ? ' (empty)' : ''}`
                 }
               </div>
             ))}
           </div>
         </div>
+      )}
+
+      {/* Database Inspector - only show in DEBUG mode */}
+      {DEBUG && shouldInitializeLeaderboard && (
+        <DatabaseInspector
+          userId={user?.uid}
+          groupId={currentGroupId}
+          period={period}
+          visible={true}
+        />
       )}
     </div>
   );

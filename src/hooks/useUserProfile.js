@@ -1,225 +1,223 @@
-// src/hooks/useUserProfile.js
-import { useEffect, useState, useRef, useMemo, useCallback } from "react";
-import { doc, onSnapshot } from "firebase/firestore";
+// src/hooks/useUserProfile.js - FIXED: Sanitize groups at source
+import { useState, useEffect } from "react";
+import { doc, getDoc, collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
-import { assignUserToGroup } from "../utils/groupUtils"; // ✅ added import
 
-// -----------------------------
-// In-memory cache & localStorage
-// -----------------------------
-const profileCacheByUid = new Map();
-const LOCAL_STORAGE_KEY_PREFIX = "userProfile_";
+const DEBUG = false; // Set to true only for debugging
 
-// -----------------------------
-// Debug mode toggle
-// -----------------------------
-const DEBUG = true; // set false in production
+// UUID validation pattern for valid groups
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Known invalid patterns to filter out
+const INVALID_PATTERNS = [
+  'nnn', 'null', 'undefined', 'none', 'n/a', '', 'test', 
+  'placeholder', 'temp', 'dummy', 'sample', 'default'
+];
+
+/**
+ * Validates if a group ID is legitimate for Firestore operations
+ */
+function isValidGroupId(groupId) {
+  if (!groupId || typeof groupId !== 'string') {
+    return false;
+  }
+  
+  const sanitized = groupId.trim();
+  
+  // Empty or too short
+  if (sanitized.length < 3) {
+    return false;
+  }
+  
+  // Check against known invalid patterns
+  const lowerSanitized = sanitized.toLowerCase();
+  if (INVALID_PATTERNS.includes(lowerSanitized)) {
+    return false;
+  }
+  
+  // Check if it's all the same character (like "nnn", "aaa", etc.)
+  if (sanitized.split('').every(char => char === sanitized[0])) {
+    return false;
+  }
+  
+  // Reject obvious school/class derivations
+  if (lowerSanitized.includes('_class') || 
+      lowerSanitized.includes(' class') ||
+      lowerSanitized.includes('school_') ||
+      lowerSanitized.includes('_grade')) {
+    return false;
+  }
+  
+  // Accept UUID format (most reliable valid case)
+  if (UUID_PATTERN.test(sanitized)) {
+    return true;
+  }
+  
+  // For non-UUID formats, be more restrictive
+  // Must not contain spaces or obvious invalid patterns
+  if (sanitized.includes(' ') || sanitized.includes('_')) {
+    return false;
+  }
+  
+  // Must be alphanumeric with some complexity
+  if (!/^[a-zA-Z0-9-]+$/.test(sanitized) || sanitized.length < 8) {
+    return false;
+  }
+  
+  return true;
+}
+
+/**
+ * Sanitizes and validates groups from raw profile data
+ */
+async function sanitizeProfileGroups(rawProfile) {
+  if (!rawProfile || typeof rawProfile !== 'object') {
+    return [];
+  }
+  
+  // Collect potential group IDs from various profile fields
+  const candidates = [
+    rawProfile.groupId,
+    rawProfile.group,
+    ...(Array.isArray(rawProfile.groups) ? rawProfile.groups : [])
+  ].filter(Boolean);
+  
+  if (candidates.length === 0) {
+    return [];
+  }
+  
+  // First pass: basic validation
+  const validCandidates = candidates
+    .map(id => typeof id === 'string' ? id.trim() : null)
+    .filter(id => id && isValidGroupId(id));
+  
+  if (validCandidates.length === 0) {
+    if (DEBUG) {
+      console.log('🚫 No valid group candidates after basic validation:', candidates);
+    }
+    return [];
+  }
+  
+  // Second pass: verify existence in Firestore (batch check)
+  try {
+    const uniqueCandidates = [...new Set(validCandidates)];
+    const BATCH_SIZE = 10; // Firestore 'in' query limit
+    const verifiedGroups = [];
+    
+    for (let i = 0; i < uniqueCandidates.length; i += BATCH_SIZE) {
+      const batch = uniqueCandidates.slice(i, i + BATCH_SIZE);
+      
+      try {
+        const q = query(collection(db, "groups"), where("__name__", "in", batch));
+        const snapshot = await getDocs(q);
+        
+        snapshot.forEach(doc => {
+          verifiedGroups.push(doc.id);
+        });
+      } catch (error) {
+        if (DEBUG) {
+          console.warn('⚠️ Error verifying group batch:', batch, error);
+        }
+        // On verification error, fall back to basic validation for this batch
+        verifiedGroups.push(...batch);
+      }
+    }
+    
+    if (DEBUG && verifiedGroups.length !== validCandidates.length) {
+      const unverified = validCandidates.filter(id => !verifiedGroups.includes(id));
+      console.log('🔍 Groups filtered out during Firestore verification:', unverified);
+    }
+    
+    return verifiedGroups;
+    
+  } catch (error) {
+    console.warn('⚠️ Group verification failed, using basic validation only:', error);
+    return [...new Set(validCandidates)]; // Fallback to basic validation
+  }
+}
 
 export function useUserProfile(uid) {
-  const [rawProfile, setRawProfile] = useState(null);
+  const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [retryCount, setRetryCount] = useState(0);
 
-  const retryTimer = useRef(null);
-  const unsubscribeRef = useRef(null);
-  const lastSnapshotPendingWrites = useRef(null);
-  const previousUid = useRef(null);
-  const assignedRef = useRef(false); // ✅ track if user has been assigned to group
-
-  const profileDataChanged = useCallback((a, b) => {
-    return JSON.stringify(a) !== JSON.stringify(b);
-  }, []);
-
-  const isProfileIncomplete = (data) => {
-    return !data || Object.keys(data).length === 0 || !data.role;
-  };
-
-  // -----------------------------
-  // Load from cache / localStorage instantly
-  // -----------------------------
   useEffect(() => {
-    if (!uid) return;
-
-    const cached = profileCacheByUid.get(uid);
-    if (cached) {
-      setRawProfile(cached);
+    if (!uid) {
+      setProfile(null);
       setLoading(false);
       setError(null);
       return;
     }
 
-    const stored = localStorage.getItem(`${LOCAL_STORAGE_KEY_PREFIX}${uid}`);
-    if (stored) {
+    const fetchProfile = async () => {
       try {
-        const parsed = JSON.parse(stored);
-        profileCacheByUid.set(uid, parsed);
-        setRawProfile(parsed);
-        setLoading(false);
+        setLoading(true);
         setError(null);
-      } catch {
-        // ignore parse errors
+
+        if (DEBUG) {
+          console.log('📥 Fetching profile for UID:', uid);
+        }
+
+        const docRef = doc(db, "users", uid);
+        const docSnap = await getDoc(docRef);
+
+        if (!docSnap.exists()) {
+          setError("User profile not found");
+          setProfile(null);
+          return;
+        }
+
+        const rawProfile = docSnap.data();
+        
+        if (DEBUG) {
+          console.log('📥 Raw profile data:', rawProfile);
+          console.log('📥 Raw groups before sanitization:', {
+            groupId: rawProfile.groupId,
+            group: rawProfile.group,
+            groups: rawProfile.groups
+          });
+        }
+
+        // ✅ SANITIZE GROUPS AT SOURCE
+        const sanitizedGroups = await sanitizeProfileGroups(rawProfile);
+        
+        // Create sanitized profile with clean groups array
+        const sanitizedProfile = {
+          ...rawProfile,
+          groups: sanitizedGroups, // Always array of valid group IDs only
+          // Keep original fields for backward compatibility but don't use them downstream
+          _originalGroupId: rawProfile.groupId, // For debugging only
+          _originalGroup: rawProfile.group, // For debugging only
+        };
+
+        if (DEBUG) {
+          console.log('✅ Groups after sanitization:', sanitizedGroups);
+          console.log('✅ Sanitized profile groups field:', sanitizedProfile.groups);
+          console.log('✅ Profile ready for downstream use');
+        }
+
+        setProfile(sanitizedProfile);
+
+      } catch (err) {
+        console.error("Error fetching user profile:", err);
+        setError("Failed to load user profile");
+        setProfile(null);
+      } finally {
+        setLoading(false);
       }
-    }
+    };
+
+    fetchProfile();
   }, [uid]);
 
-  // -----------------------------
-  // Stable profile memoization
-  // -----------------------------
-  const profile = useMemo(() => {
-    if (!rawProfile || !uid) return null;
-
-    const cached = profileCacheByUid.get(uid);
-    if (cached && cached._stable) return cached;
-
-    const stableProfile = {
-      ...rawProfile,
-      createdAt: rawProfile.createdAt ?? null,
-      avatar: rawProfile.avatar ?? "/default-avatar.png",
-      _stable: true,
-    };
-
-    profileCacheByUid.set(uid, stableProfile);
-    localStorage.setItem(
-      `${LOCAL_STORAGE_KEY_PREFIX}${uid}`,
-      JSON.stringify(stableProfile)
-    );
-
-    return stableProfile;
-  }, [rawProfile, uid]);
-
-  // -----------------------------
-  // Snapshot listener with retry
-  // -----------------------------
-  useEffect(() => {
-    let mounted = true;
-    if (!uid || typeof uid !== "string") return cleanup();
-
-    const cached = profileCacheByUid.get(uid);
-    if (
-      uid === previousUid.current &&
-      retryCount === 0 &&
-      cached &&
-      cached._stable
-    ) {
-      setRawProfile(cached);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-
-    previousUid.current = uid;
-    setLoading(true);
-    setError(null);
-
-    const userRef = doc(db, "users", uid);
-    unsubscribeRef.current?.();
-    clearTimeout(retryTimer.current);
-
-    const unsubscribe = onSnapshot(
-      userRef,
-      (docSnap) => {
-        if (!mounted) return;
-
-        const pendingWrites = docSnap.metadata.hasPendingWrites;
-        if (
-          lastSnapshotPendingWrites.current === pendingWrites &&
-          rawProfile !== null
-        ) return;
-
-        lastSnapshotPendingWrites.current = pendingWrites;
-
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-
-          if (DEBUG) {
-            console.log("=== PROFILE FETCH DEBUG ===");
-            console.log("Raw Firestore data:", data);
-            console.log("data.groupId:", data.groupId);
-            console.log("data.schoolId:", data.schoolId);
-            console.log("All fields:", Object.keys(data));
-            console.log("========================");
-          }
-
-          if (isProfileIncomplete(data)) {
-            setRawProfile(null);
-            setError("Profile incomplete");
-            setLoading(false);
-            return;
-          }
-
-          const newProfile = {
-            ...data,
-            createdAt: data.createdAt ?? null,
-            avatar: data.avatar ?? "/default-avatar.png",
-            _stable: true,
-          };
-
-          if (!rawProfile || profileDataChanged(data, rawProfile)) {
-            setRawProfile(newProfile);
-            profileCacheByUid.set(uid, newProfile);
-            localStorage.setItem(
-              `${LOCAL_STORAGE_KEY_PREFIX}${uid}`,
-              JSON.stringify(newProfile)
-            );
-          }
-
-          // ✅ Assign user to group safely once per profile load
-          if (!assignedRef.current) {
-            assignedRef.current = true;
-            // Only assign if profile has schoolId and grade
-            if (data.schoolId && data.grade) {
-              assignUserToGroup(uid, newProfile).catch(err => {
-                if (DEBUG) console.error("Failed to assign group:", err);
-              });
-            }
-          }
-
-          setError(null);
-          setLoading(false);
-        } else {
-          if (DEBUG) console.log("❌ User document does not exist!");
-          setRawProfile(null);
-          setError("Profile not found");
-          setLoading(false);
-        }
-      },
-      (err) => {
-        if (!mounted) return;
-        setError("Failed to fetch profile.");
-        setLoading(false);
-        if (retryCount < 3) {
-          const delay = 1000 * (retryCount + 1);
-          retryTimer.current = setTimeout(() => {
-            setRetryCount((prev) => prev + 1);
-          }, delay);
-        }
-      }
-    );
-
-    unsubscribeRef.current = unsubscribe;
-
-    function cleanup() {
-      unsubscribeRef.current?.();
-      clearTimeout(retryTimer.current);
-      if (mounted) {
-        setRawProfile(null);
-        setLoading(false);
-        setError(null);
-      }
-    }
-
-    return () => {
-      mounted = false;
-      cleanup();
-    };
-  }, [uid, retryCount, profileDataChanged, rawProfile]);
-
-  // -----------------------------
-  // Return profile
-  // -----------------------------
-  return useMemo(
-    () => ({ profile, loading, error, hasProfile: !!profile }),
-    [profile, loading, error]
-  );
+  // Return sanitized profile with guaranteed clean groups array
+  return { 
+    profile, 
+    loading, 
+    error,
+    // Helper getters for common access patterns
+    validGroups: profile?.groups || [], // Always returns array of valid group IDs
+    primaryGroupId: profile?.groups?.[0] || null, // First valid group ID or null
+    hasGroups: (profile?.groups?.length || 0) > 0,
+  };
 }

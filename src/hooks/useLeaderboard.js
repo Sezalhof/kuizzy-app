@@ -1,4 +1,4 @@
-// src/hooks/useLeaderboard.js
+// src/hooks/useLeaderboard.js - PRODUCTION READY VERSION
 import { useState, useEffect, useCallback, useRef } from "react";
 import { db } from "../firebase";
 import {
@@ -12,12 +12,12 @@ import {
   onSnapshot,
 } from "firebase/firestore";
 
-// ---------------- Config ----------------
+// Configuration
 const PAGE_SIZE = 20;
 const GLOBAL_CACHE_EXPIRATION = 1000 * 60 * 60 * 24; // 24h
 const SCOPE_CACHE_EXPIRATION = 1000 * 60 * 30; // 30min
 const DISABLE_CACHE = false;
-const DEBUG_MODE = false;
+const DEBUG_MODE = process.env.NODE_ENV === 'development' && false; // Set to true only for debugging
 
 function getCacheKey(scopeKey, filters = {}) {
   const filterPart = Object.entries(filters)
@@ -49,10 +49,46 @@ function saveCache(scopeKey, filters = {}, entries) {
       key,
       JSON.stringify({ entries: entries.slice(0, PAGE_SIZE), lastUpdated: Date.now() })
     );
-  } catch {}
+  } catch {
+    // Silently fail cache save
+  }
 }
 
-// ---------------- Hook ----------------
+function processEntries(docs) {
+  // Deduplicate by userId - keep the most recent attempt
+  const dedupMap = new Map();
+  docs.forEach((doc) => {
+    const existing = dedupMap.get(doc.userId);
+    if (!existing || (doc.finishedAt?.toMillis?.() ?? 0) > (existing.finishedAt?.toMillis?.() ?? 0)) {
+      dedupMap.set(doc.userId, doc);
+    }
+  });
+  
+  const processedDocs = Array.from(dedupMap.values());
+
+  // Sort by combined score (desc), time taken (asc), finished date (desc)
+  processedDocs.sort((a, b) => {
+    if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
+    if ((a.timeTaken ?? Infinity) !== (b.timeTaken ?? Infinity)) return (a.timeTaken ?? Infinity) - (b.timeTaken ?? Infinity);
+    return (b.finishedAt?.toMillis?.() ?? 0) - (a.finishedAt?.toMillis?.() ?? 0);
+  });
+
+  // Assign ranks
+  let lastScore = null, lastTime = null, lastRank = 0;
+  processedDocs.forEach((doc, idx) => {
+    if (doc.combinedScore === lastScore && doc.timeTaken === lastTime) {
+      doc.rank = lastRank;
+    } else {
+      doc.rank = idx + 1;
+      lastRank = idx + 1;
+      lastScore = doc.combinedScore;
+      lastTime = doc.timeTaken;
+    }
+  });
+
+  return processedDocs;
+}
+
 export default function useLeaderboard(scopeKey, filters = {}, mode = "live") {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -68,7 +104,13 @@ export default function useLeaderboard(scopeKey, filters = {}, mode = "live") {
 
       try {
         const scoresCol = collection(db, "scores");
-        let q = query(scoresCol, orderBy("combinedScore", "desc"), orderBy("timeTaken", "asc"), orderBy("finishedAt", "desc"), firestoreLimit(PAGE_SIZE));
+        let q = query(
+          scoresCol, 
+          orderBy("combinedScore", "desc"), 
+          orderBy("timeTaken", "asc"), 
+          orderBy("finishedAt", "desc"), 
+          firestoreLimit(PAGE_SIZE)
+        );
 
         // Apply filters
         Object.entries(filters).forEach(([field, value]) => {
@@ -83,44 +125,18 @@ export default function useLeaderboard(scopeKey, filters = {}, mode = "live") {
         }
 
         const snapshot = await getDocs(q);
-        let docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-        // Deduplicate by userId
-        const dedupMap = new Map();
-        docs.forEach((doc) => {
-          const existing = dedupMap.get(doc.userId);
-          if (!existing || (doc.finishedAt?.toMillis?.() ?? 0) > (existing.finishedAt?.toMillis?.() ?? 0)) {
-            dedupMap.set(doc.userId, doc);
-          }
-        });
-        docs = Array.from(dedupMap.values());
+        // Process entries (deduplicate and rank)
+        const processedDocs = processEntries(docs);
 
-        // Assign rank
-        let lastScore = null,
-          lastTime = null,
-          lastRank = 0;
-        docs.sort((a, b) => {
-          if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
-          if ((a.timeTaken ?? Infinity) !== (b.timeTaken ?? Infinity)) return (a.timeTaken ?? Infinity) - (b.timeTaken ?? Infinity);
-          return (b.finishedAt?.toMillis?.() ?? 0) - (a.finishedAt?.toMillis?.() ?? 0);
-        });
-        docs.forEach((doc, idx) => {
-          if (doc.combinedScore === lastScore && doc.timeTaken === lastTime) {
-            doc.rank = lastRank;
-          } else {
-            doc.rank = idx + 1;
-            lastRank = idx + 1;
-            lastScore = doc.combinedScore;
-            lastTime = doc.timeTaken;
-          }
-        });
-
-        setEntries((prev) => (append ? [...prev, ...docs] : docs));
+        setEntries((prev) => (append ? [...prev, ...processedDocs] : processedDocs));
         setLastDoc(snapshot.docs[snapshot.docs.length - 1]);
         setHasMore(snapshot.docs.length === PAGE_SIZE);
 
-        if (!append) saveCache(scopeKey, filters, docs);
+        if (!append) saveCache(scopeKey, filters, processedDocs);
       } catch (err) {
+        console.error("Failed to load leaderboard:", err);
         setError("Failed to load leaderboard.");
       } finally {
         setLoading(false);
@@ -140,7 +156,7 @@ export default function useLeaderboard(scopeKey, filters = {}, mode = "live") {
     }
   }, [scopeKey, filters, mode, fetchPage]);
 
-  // Optional live mode
+  // Live mode with real-time updates
   useEffect(() => {
     if (mode !== "live") return;
 
@@ -153,55 +169,55 @@ export default function useLeaderboard(scopeKey, filters = {}, mode = "live") {
       }
     });
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      let docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+    // Capture the unsubscribe ref at effect setup time
+    const currentUnsubscribeRef = unsubscribeRef;
 
-      // Deduplicate + rank
-      const dedupMap = new Map();
-      docs.forEach((doc) => {
-        const existing = dedupMap.get(doc.userId);
-        if (!existing || (doc.finishedAt?.toMillis?.() ?? 0) > (existing.finishedAt?.toMillis?.() ?? 0)) {
-          dedupMap.set(doc.userId, doc);
-        }
-      });
-      docs = Array.from(dedupMap.values());
-      docs.sort((a, b) => {
-        if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
-        if ((a.timeTaken ?? Infinity) !== (b.timeTaken ?? Infinity)) return (a.timeTaken ?? Infinity) - (b.timeTaken ?? Infinity);
-        return (b.finishedAt?.toMillis?.() ?? 0) - (a.finishedAt?.toMillis?.() ?? 0);
-      });
-      let lastScore = null,
-        lastTime = null,
-        lastRank = 0;
-      docs.forEach((doc, idx) => {
-        if (doc.combinedScore === lastScore && doc.timeTaken === lastTime) {
-          doc.rank = lastRank;
-        } else {
-          doc.rank = idx + 1;
-          lastRank = idx + 1;
-          lastScore = doc.combinedScore;
-          lastTime = doc.timeTaken;
-        }
-      });
+    const unsubscribe = onSnapshot(
+      q, 
+      (snapshot) => {
+        const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const processedDocs = processEntries(docs);
+        setEntries(processedDocs);
+      },
+      (error) => {
+        console.error("Live leaderboard update error:", error);
+        setError("Failed to receive live updates.");
+      }
+    );
 
-      setEntries(docs);
-    });
-
-    unsubscribeRef.current = unsubscribe;
+    currentUnsubscribeRef.current = unsubscribe;
+    
     return () => {
-      unsubscribeRef.current && unsubscribeRef.current();
+      if (currentUnsubscribeRef.current) {
+        currentUnsubscribeRef.current();
+        currentUnsubscribeRef.current = null;
+      }
     };
   }, [filters, mode]);
 
-  const loadMore = () => {
-    if (lastDoc && !loading) fetchPage(lastDoc, true);
-  };
+  const loadMore = useCallback(() => {
+    if (lastDoc && !loading) {
+      fetchPage(lastDoc, true);
+    }
+  }, [lastDoc, loading, fetchPage]);
 
-  // Debug
+  // Debug logging only in development mode
   useEffect(() => {
     if (!DEBUG_MODE) return;
-    console.log("=== Leaderboard Debug ===", { scopeKey, filters, entries, loading, error });
-  }, [scopeKey, filters, entries, loading, error]);
+    console.log("Leaderboard Debug:", { 
+      scopeKey, 
+      filters, 
+      entriesCount: entries.length, 
+      loading, 
+      error 
+    });
+  }, [scopeKey, filters, entries.length, loading, error]);
 
-  return { entries, loading, error, hasMore, loadMore };
+  return { 
+    entries, 
+    loading, 
+    error, 
+    hasMore, 
+    loadMore 
+  };
 }

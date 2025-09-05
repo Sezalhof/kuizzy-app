@@ -1,4 +1,4 @@
-// src/components/tests/TestPlayer.jsx
+// src/components/tests/TestPlayer.jsx - OPTIMIZED VERSION
 import React, { useState } from "react";
 import useAuth from "../../hooks/useAuth";
 
@@ -25,10 +25,18 @@ export default function TestPlayer({ test, onComplete, profile, profileLoading }
   const totalQuestions = questions.length;
   const currentQuestion = questions[currentQuestionIndex];
 
-  // --- Wait for profile or auth loading
-  if (authLoading || profileLoading) return <div className="p-4 text-gray-600">Loading...</div>;
-  if (!profile || !user) return <div className="p-4 text-red-600">User profile not found.</div>;
-  if (!test) return <div className="p-4 text-red-600">Test not found.</div>;
+  // Wait for profile or auth loading
+  if (authLoading || profileLoading) {
+    return <div className="p-4 text-gray-600">Loading...</div>;
+  }
+  
+  if (!profile || !user) {
+    return <div className="p-4 text-red-600">User profile not found.</div>;
+  }
+  
+  if (!test) {
+    return <div className="p-4 text-red-600">Test not found.</div>;
+  }
 
   const handleStart = () => {
     setPlaying(true);
@@ -55,7 +63,6 @@ export default function TestPlayer({ test, onComplete, profile, profileLoading }
     }
   };
 
-  // --- Finish Handler (refactored to pass result object)
   const handleFinish = async () => {
     setFinished(true);
     setPlaying(false);
@@ -69,22 +76,30 @@ export default function TestPlayer({ test, onComplete, profile, profileLoading }
     const combinedScore = Number(score || 0) + remainingTime / 60;
     setTodayCombinedScore(combinedScore.toFixed(2));
 
-    // ✅ Pass result object instead of raw params
-    onComplete?.({
-      rawScore: score,
-      totalQuestions,
-      userAnswers,
-      startedAt,
-      finishedAt,
-      combinedScore,
-    });
+    // Pass result object to parent component
+    try {
+      await onComplete?.({
+        rawScore: score,
+        totalQuestions,
+        userAnswers,
+        startedAt,
+        finishedAt,
+        combinedScore,
+      });
+    } catch (error) {
+      console.error("Error completing test:", error);
+      setSavingError(error.message || "Failed to save test results");
+    }
   };
 
-  // --- UI Rendering ---
+  // UI Rendering
   if (!playing) {
     return (
       <div className="p-4 border rounded shadow">
         <h2 className="text-xl font-bold mb-4">{test.title}</h2>
+        <p className="text-gray-600 mb-4">
+          Questions: {totalQuestions} | Duration: {Math.floor((test.duration || 900) / 60)} minutes
+        </p>
         <button
           onClick={handleStart}
           className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -98,20 +113,31 @@ export default function TestPlayer({ test, onComplete, profile, profileLoading }
   if (finished) {
     return (
       <div className="p-4 border rounded shadow">
-        <h2 className="text-xl font-bold mb-4">Test Finished: {test.title}</h2>
-        <p>
-          Your Score: {score} / {totalQuestions}
-        </p>
-        {todayCombinedScore && (
-          <p className="font-semibold mt-1">Today’s Combined Score: {todayCombinedScore}</p>
+        <h2 className="text-xl font-bold mb-4">Test Completed: {test.title}</h2>
+        <div className="space-y-2 mb-4">
+          <p>
+            Your Score: {score} / {totalQuestions} ({((score / totalQuestions) * 100).toFixed(1)}%)
+          </p>
+          {todayCombinedScore && (
+            <p className="font-semibold text-green-600">
+              Combined Score: {todayCombinedScore}
+            </p>
+          )}
+        </div>
+        
+        {savingError && (
+          <div className="p-3 mb-4 bg-red-50 border border-red-200 rounded">
+            <p className="text-red-800 font-medium">Error saving results:</p>
+            <p className="text-red-700 text-sm">{savingError}</p>
+          </div>
         )}
-        {savingError && <p className="text-red-600 mt-2">Failed to save attempt: {savingError}</p>}
+        
         <button
           onClick={() => {
             setFinished(false);
             setPlaying(false);
           }}
-          className="mt-4 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+          className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
         >
           Close
         </button>
@@ -121,30 +147,56 @@ export default function TestPlayer({ test, onComplete, profile, profileLoading }
 
   return (
     <div className="p-4 border rounded shadow">
-      <h2 className="text-xl font-bold mb-4">{test.title}</h2>
-      <p className="mb-2">
-        Question {currentQuestionIndex + 1} of {totalQuestions}
-      </p>
-      <p className="mb-4 font-semibold">{currentQuestion.text}</p>
-      <div className="space-y-2">
-        {currentQuestion.options.map((opt, idx) => (
-          <button
-            key={idx}
-            onClick={() => handleAnswer(idx)}
-            disabled={userAnswers[currentQuestion.id] !== undefined}
-            className="block w-full text-left px-4 py-2 border rounded hover:bg-blue-100"
-            style={{
-              backgroundColor:
-                userAnswers[currentQuestion.id] === idx
-                  ? idx === currentQuestion.correct
-                    ? "lightgreen"
-                    : "#fca5a5"
-                  : "",
-            }}
-          >
-            {opt}
-          </button>
-        ))}
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-bold">{test.title}</h2>
+        <div className="text-sm text-gray-600">
+          Question {currentQuestionIndex + 1} of {totalQuestions}
+        </div>
+      </div>
+      
+      <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
+        <div 
+          className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
+          style={{ width: `${((currentQuestionIndex + 1) / totalQuestions) * 100}%` }}
+        ></div>
+      </div>
+      
+      <p className="mb-6 text-lg font-semibold">{currentQuestion.text}</p>
+      
+      <div className="space-y-3">
+        {currentQuestion.options.map((opt, idx) => {
+          const isAnswered = userAnswers[currentQuestion.id] !== undefined;
+          const isSelected = userAnswers[currentQuestion.id] === idx;
+          const isCorrect = idx === currentQuestion.correct;
+          
+          let buttonClass = "block w-full text-left px-4 py-3 border rounded-lg transition-colors ";
+          
+          if (isAnswered) {
+            if (isSelected && isCorrect) {
+              buttonClass += "bg-green-100 border-green-300 text-green-800";
+            } else if (isSelected && !isCorrect) {
+              buttonClass += "bg-red-100 border-red-300 text-red-800";
+            } else if (isCorrect) {
+              buttonClass += "bg-green-50 border-green-200 text-green-700";
+            } else {
+              buttonClass += "bg-gray-50 border-gray-200 text-gray-600";
+            }
+          } else {
+            buttonClass += "hover:bg-blue-50 hover:border-blue-300 border-gray-300";
+          }
+          
+          return (
+            <button
+              key={idx}
+              onClick={() => handleAnswer(idx)}
+              disabled={isAnswered}
+              className={buttonClass}
+            >
+              <span className="font-medium mr-2">{String.fromCharCode(65 + idx)}.</span>
+              {opt}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

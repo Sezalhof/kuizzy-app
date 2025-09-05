@@ -1,3 +1,4 @@
+// src/utils/saveAttempt.js
 import {
   collection,
   doc,
@@ -11,7 +12,6 @@ import { db } from "../firebase";
 import { getTwoMonthPeriod } from "./dateUtils"; // ✅ centralized
 
 const DEBUG_MODE = false;
-
 function log(...args) {
   if (DEBUG_MODE) console.log("[saveAttempt]", ...args);
 }
@@ -71,9 +71,11 @@ export async function saveAttempt({
     createdAt: serverTimestamp(),
   };
 
+  // Save attempt
   const attemptRef = await addDoc(collection(db, "test_attempts"), attemptData);
   log("✅ Test attempt saved:", attemptRef.id);
 
+  // Update user rank
   const userRankRef = doc(db, "user_ranks", userId);
   await setDoc(
     userRankRef,
@@ -90,6 +92,7 @@ export async function saveAttempt({
   );
   log("✅ User rank updated");
 
+  // Update group leaderboard
   if (groupId) {
     const groupLeaderboardId = `${groupId}_${period}`;
     const groupRankRef = doc(db, "group_leaderboards", groupLeaderboardId, "members", userId);
@@ -110,6 +113,7 @@ export async function saveAttempt({
     log("✅ Group leaderboard updated:", groupLeaderboardId);
   }
 
+  // Update global leaderboard
   const globalLeaderboardId = `global_all_${period}`;
   const globalRef = doc(db, "group_leaderboards", globalLeaderboardId, "members", userId);
   await setDoc(
@@ -135,6 +139,7 @@ export async function saveAttempt({
   return attemptRef.id;
 }
 
+// Ensure user is part of a group
 export async function ensureUserInGroup(groupId, userId) {
   if (!groupId || !userId) return;
   const ref = doc(db, "groups", groupId);

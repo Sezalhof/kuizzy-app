@@ -1,4 +1,4 @@
-// src/hooks/useUnifiedLeaderboard.js - COMPREHENSIVE FIX
+// src/hooks/useUnifiedLeaderboard.js - PRODUCTION READY VERSION
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { db } from "../firebase";
 import {
@@ -6,13 +6,13 @@ import {
   getDocs,
   onSnapshot,
   query,
-  orderBy,
   where,
-  limit as firestoreLimit,
 } from "firebase/firestore";
+import { getCleanLeaderboard, isValidLeaderboardEntry, addRanksToEntries } from "../utils/leaderboardUtils";
+import { extractValidGroups, getBestGroupId } from "../utils/groupUtils";
 
-const DEBUG_MODE = true;
 const PAGE_SIZE = 20;
+const DEBUG_MODE = process.env.NODE_ENV === 'development' && false; // Set to true only for debugging
 
 const SCOPE_FIELD_MAP = {
   global: null,
@@ -30,185 +30,71 @@ function sanitizeId(id) {
 }
 
 export function useUnifiedLeaderboard(userId, userProfile, periodInput, mode = "live") {
-  // 🔧 FIX 1: Better parameter validation
-const normalizedPeriod = useMemo(() => {
-  if (!periodInput) return "";
-  return typeof periodInput === "string"
-    ? periodInput
-    : periodInput?.label || periodInput?.value || "";
-}, [periodInput]);
+  const normalizedPeriod = useMemo(() => {
+    if (!periodInput) return "";
+    return typeof periodInput === "string"
+      ? periodInput
+      : periodInput?.label || periodInput?.value || "";
+  }, [periodInput]);
 
   const [leaderboards, setLeaderboards] = useState({});
   const [loadingScopes, setLoadingScopes] = useState({});
   const [errors, setErrors] = useState({});
   const [availableScopes, setAvailableScopes] = useState([]);
-  const groupListenersRef = useRef({});
+  const [initialized, setInitialized] = useState(false);
+  
+  // Use refs to prevent duplicate listeners and track initialization
+  const groupListenersRef = useRef(new Map());
+  const initializationRef = useRef(false);
+  const lastInitParamsRef = useRef("");
 
-  // 🔧 FIX 2: Early validation to prevent null userId calls
+  // Enhanced readiness check
   const isReady = useCallback(() => {
-    const ready = !!(userId && normalizedPeriod && userProfile);
-    if (!ready && DEBUG_MODE) {
-      console.log("🚫 Leaderboard not ready:", {
-        userId: !!userId,
-        normalizedPeriod: !!normalizedPeriod,
-        userProfile: !!userProfile,
-        actualValues: { userId, normalizedPeriod, userProfile: userProfile?.displayName }
-      });
-    }
-    return ready;
+    const hasUserId = !!(userId && userId !== "");
+    const hasPeriod = !!(normalizedPeriod && normalizedPeriod !== "");
+    const hasProfile = !!(userProfile && typeof userProfile === 'object');
+    
+    return hasUserId && hasPeriod && hasProfile;
   }, [userId, normalizedPeriod, userProfile]);
 
-  // Enhanced debug helper
-  const debugDatabase = useCallback(async () => {
-    if (!DEBUG_MODE || !isReady()) return;
-
-    console.log("=== ENHANCED DATABASE DEBUG ===");
-    console.log("Period:", normalizedPeriod);
-    console.log("User Profile:", userProfile);
-    console.log("User ID:", userId);
-
-    try {
-      const allScoresQuery = query(collection(db, "test_attempts"));
-      const allScoresSnapshot = await getDocs(allScoresQuery);
-
-      console.log(
-        "Total documents in test_attempts collection:",
-        allScoresSnapshot.size
-      );
-
-      const allDocs = [];
-      allScoresSnapshot.forEach((doc) => {
-        const data = doc.data();
-        allDocs.push({ id: doc.id, ...data });
-      });
-
-      // 🔧 FIX 3: Enhanced group analysis for multiple groups
-      const userGroups = [...new Set([
-        userProfile?.groupId,
-        userProfile?.group,
-        ...(userProfile?.groups || [])
-      ].filter(Boolean))];
-      
-      console.log("👥 User belongs to groups:", userGroups);
-
-      const allGroups = [...new Set(allDocs.map((doc) => doc.groupId).filter(Boolean))];
-      console.log("📊 All available groups in database:", allGroups);
-
-      // Check which user groups have data
-      userGroups.forEach(groupId => {
-        const groupDocs = allDocs.filter(doc => doc.groupId === groupId);
-        console.log(`📈 Documents for user's group ${groupId}:`, groupDocs.length);
-      });
-
-      const periodDocs = allDocs.filter(
-        (doc) => doc.twoMonthPeriod === normalizedPeriod
-      );
-      console.log(`📅 Documents with period ${normalizedPeriod}:`, periodDocs.length);
-
-      // Regional analysis
-      const regionalAnalysis = {
-        schoolId: allDocs.filter(doc => doc.schoolId === userProfile?.schoolId).length,
-        unionId: allDocs.filter(doc => doc.unionId === userProfile?.unionId).length,
-        upazilaId: allDocs.filter(doc => doc.upazilaId === userProfile?.upazilaId).length,
-        districtId: allDocs.filter(doc => doc.districtId === userProfile?.districtId).length,
-        divisionId: allDocs.filter(doc => doc.divisionId === userProfile?.divisionId).length,
-      };
-
-      console.log("🗺️ Regional scope analysis:", regionalAnalysis);
-
-    } catch (error) {
-      console.error("Database debug error:", error);
-    }
-  }, [normalizedPeriod, userProfile, userId, isReady]);
-
-  useEffect(() => {
-    if (DEBUG_MODE && isReady()) {
-      debugDatabase();
-    }
-  }, [debugDatabase]);
-
-  // 🔧 FIX 4: Improved deduplication strategy
-  const deduplicateEntries = useCallback((entries, strategy = 'latest') => {
-    if (!entries || entries.length === 0) return [];
-
-    const dedupMap = new Map();
-    
-    entries.forEach((entry, index) => {
-      const existing = dedupMap.get(entry.userId);
-      
-      if (!existing) {
-        console.log(`➕ Adding first entry for user ${entry.userId}:`, {
-          combinedScore: entry.combinedScore,
-          timeTaken: entry.timeTaken,
-          finishedAt: entry.finishedAt?.toDate?.()
-        });
-        dedupMap.set(entry.userId, entry);
-        return;
-      }
-
-      let shouldReplace = false;
-      
-      switch (strategy) {
-        case 'latest':
-          // Keep the most recent attempt
-          shouldReplace = (entry.finishedAt?.toMillis?.() ?? 0) > (existing.finishedAt?.toMillis?.() ?? 0);
-          break;
-        case 'highest':
-          // Keep the highest scoring attempt
-          shouldReplace = (entry.combinedScore ?? 0) > (existing.combinedScore ?? 0);
-          break;
-        case 'best':
-          // Keep highest score, then latest if tied
-          const scoreDiff = (entry.combinedScore ?? 0) - (existing.combinedScore ?? 0);
-          if (scoreDiff > 0) {
-            shouldReplace = true;
-          } else if (scoreDiff === 0) {
-            shouldReplace = (entry.finishedAt?.toMillis?.() ?? 0) > (existing.finishedAt?.toMillis?.() ?? 0);
-          }
-          break;
-        default:
-          shouldReplace = (entry.finishedAt?.toMillis?.() ?? 0) > (existing.finishedAt?.toMillis?.() ?? 0);
-      }
-
-      if (shouldReplace) {
-        console.log(`🔄 Replacing entry for user ${entry.userId} (${strategy} strategy):`, {
-          old: { score: existing.combinedScore, time: existing.finishedAt?.toDate?.() },
-          new: { score: entry.combinedScore, time: entry.finishedAt?.toDate?.() }
-        });
-        dedupMap.set(entry.userId, entry);
-      } else {
-        console.log(`⏭️ Keeping existing entry for user ${entry.userId}`);
-      }
-    });
-    
-    return Array.from(dedupMap.values());
-  }, []);
+  // Extract and memoize valid user groups using utility function from groupUtils.js
+  const userGroups = useMemo(() => extractValidGroups(userProfile), [userProfile]);
 
   const fetchScope = useCallback(
     async (scopeKey, append = false, scopeId = null, limit = PAGE_SIZE) => {
-      // 🔧 FIX 5: Strict validation before any queries
-      if (!isReady()) {
-        console.log("❌ Cannot fetch scope - not ready:", { scopeKey, userId, normalizedPeriod, userProfile: !!userProfile });
+      if (!userId || !normalizedPeriod || !userProfile) {
+        if (DEBUG_MODE) {
+          console.log("Cannot fetch scope - missing required data:", { 
+            scopeKey, 
+            hasUserId: !!userId, 
+            hasPeriod: !!normalizedPeriod, 
+            hasProfile: !!userProfile 
+          });
+        }
         return;
       }
 
       const field = SCOPE_FIELD_MAP[scopeKey];
       const rawIdValue = scopeId ?? (field ? userProfile?.[field] : null);
 
-      console.log(`=== FETCH SCOPE: ${scopeKey} ===`);
-      console.log(`Field: ${field}, Raw ID: ${rawIdValue}`);
-      console.log(`Period: ${normalizedPeriod}`);
-      console.log(`User Profile:`, userProfile);
-
       // For non-global scopes, check if user has the required field
       if (field && !rawIdValue && scopeKey !== "global") {
-        console.log(`❌ Scope ${scopeKey} not available - missing field value`);
-        console.log(`💡 User profile missing field: ${field}`);
-        setErrors((prev) => ({ 
-          ...prev, 
-          [scopeKey]: `Missing ${field} in user profile` 
-        }));
+        const errorMsg = `User not assigned to any ${scopeKey}`;
+        setErrors((prev) => ({ ...prev, [scopeKey]: errorMsg }));
         setLoadingScopes((prev) => ({ ...prev, [scopeKey]: false }));
+        
+        // Set empty state for unavailable scopes
+        if (scopeKey === "group") {
+          setLeaderboards((prev) => ({
+            ...prev,
+            group: { ...prev.group }
+          }));
+        } else {
+          setLeaderboards((prev) => ({
+            ...prev,
+            [scopeKey]: { entries: [], hasMore: false, isEmpty: true }
+          }));
+        }
         return;
       }
 
@@ -217,21 +103,15 @@ const normalizedPeriod = useMemo(() => {
         setErrors((prev) => ({ ...prev, [scopeKey]: null }));
 
         const scoresCollection = collection(db, "test_attempts");
-
         let queryConstraints = [where("twoMonthPeriod", "==", normalizedPeriod)];
 
         // Add regional filter for non-global scopes
         if (scopeKey !== "global" && field && rawIdValue) {
           queryConstraints.push(where(field, "==", rawIdValue));
-          console.log(`🔍 Adding regional filter: ${field} == ${rawIdValue}`);
         }
-
-        console.log("Query constraints:", queryConstraints);
 
         const q = query(scoresCollection, ...queryConstraints);
         const snapshot = await getDocs(q);
-        
-        console.log(`📊 Query result for ${scopeKey}: ${snapshot.size} documents`);
 
         let entries = [];
         snapshot.forEach((doc) => {
@@ -239,149 +119,164 @@ const normalizedPeriod = useMemo(() => {
           entries.push({ ...data, id: doc.id });
         });
 
-        console.log(`🔧 Raw entries for ${scopeKey}:`, entries.length);
+        // Filter valid entries
+        const validEntries = entries.filter(isValidLeaderboardEntry);
 
-        // 🔧 FIX 6: Better filtering for completed test attempts
-        const validEntries = entries.filter(entry => {
-          const isValid = entry.combinedScore !== undefined && 
-                          entry.finishedAt && 
-                          entry.userId &&
-                          typeof entry.combinedScore === 'number' &&
-                          !isNaN(entry.combinedScore);
-          
-          if (!isValid && DEBUG_MODE) {
-            console.log(`❌ Filtering out invalid entry:`, {
-              id: entry.id,
-              userId: entry.userId,
-              combinedScore: entry.combinedScore,
-              finishedAt: !!entry.finishedAt,
-              hasValidScore: typeof entry.combinedScore === 'number' && !isNaN(entry.combinedScore)
-            });
-          }
-          return isValid;
-        });
-
-        console.log(`✅ Valid entries after filtering: ${validEntries.length}/${entries.length}`);
-
+        // Handle empty results gracefully
         if (validEntries.length === 0) {
-          console.log(`⚠️ No valid completed test attempts found for ${scopeKey} scope`);
-          setErrors((prev) => ({ 
-            ...prev, 
-            [scopeKey]: `No completed test attempts available` 
-          }));
+          setErrors((prev) => ({ ...prev, [scopeKey]: null }));
+          
+          if (scopeKey === "group") {
+            const groupKey = sanitizeId(rawIdValue);
+            setLeaderboards((prev) => ({
+              ...prev,
+              group: {
+                ...prev.group,
+                [groupKey]: { entries: [], hasMore: false, isEmpty: true }
+              }
+            }));
+          } else {
+            setLeaderboards((prev) => ({
+              ...prev,
+              [scopeKey]: { entries: [], hasMore: false, isEmpty: true }
+            }));
+          }
+          return;
         }
 
-        // 🔧 FIX 7: Use improved deduplication
-        const deduplicatedEntries = deduplicateEntries(validEntries, 'best'); // or 'latest' or 'highest'
+        // Clean and deduplicate entries - keep best score per user
+        const cleanedEntries = getCleanLeaderboard(validEntries, true);
+        const rankedEntries = addRanksToEntries(cleanedEntries);
 
-        // Sort final entries
-        const sortedEntries = deduplicatedEntries.sort((a, b) => {
-          if (b.combinedScore !== a.combinedScore)
-            return b.combinedScore - a.combinedScore;
-          if ((a.timeTaken ?? Infinity) !== (b.timeTaken ?? Infinity))
-            return (a.timeTaken ?? Infinity) - (b.timeTaken ?? Infinity);
-          return (
-            (b.finishedAt?.toMillis?.() ?? 0) -
-            (a.finishedAt?.toMillis?.() ?? 0)
-          );
-        });
-
-        // Add ranks
-        sortedEntries.forEach((entry, idx) => {
-          entry.rank = idx + 1;
-        });
-
-        console.log(`✅ Final entries for ${scopeKey}:`, sortedEntries.length);
-
+        // Update leaderboards state
         if (scopeKey === "group") {
           const groupKey = sanitizeId(rawIdValue);
           setLeaderboards((prev) => ({
             ...prev,
             group: {
               ...prev.group,
-              [groupKey]: { entries: sortedEntries, hasMore: false },
+              [groupKey]: { entries: rankedEntries, hasMore: false, isEmpty: false },
             },
           }));
         } else {
           setLeaderboards((prev) => ({
             ...prev,
-            [scopeKey]: { entries: sortedEntries, hasMore: false },
+            [scopeKey]: { entries: rankedEntries, hasMore: false, isEmpty: false },
           }));
         }
+
       } catch (error) {
-        console.error(`❌ Error fetching ${scopeKey}:`, error);
+        console.error(`Error fetching ${scopeKey} leaderboard:`, error);
         setErrors((prev) => ({ ...prev, [scopeKey]: error.message }));
       } finally {
         setLoadingScopes((prev) => ({ ...prev, [scopeKey]: false }));
       }
     },
-    [userId, userProfile, normalizedPeriod, isReady, deduplicateEntries]
+    [userId, userProfile, normalizedPeriod]
   );
 
-  // 🔧 FIX 8: Handle multiple groups properly
+  // Initialize leaderboards - prevent duplicate initialization
   useEffect(() => {
-    if (!isReady()) return;
+    const ready = isReady();
+    
+    if (!ready) {
+      if (DEBUG_MODE) {
+        console.log("Waiting for required data before initializing leaderboard...");
+      }
+      setInitialized(false);
+      initializationRef.current = false;
+      return;
+    }
 
-    // Get all user groups
-    const userGroups = [...new Set([
-      userProfile?.groupId,
-      userProfile?.group,
-      ...(userProfile?.groups || [])
-    ].filter(Boolean))];
+    // Create a stable key for current parameters
+    const currentParams = `${userId}-${normalizedPeriod}-${JSON.stringify(userGroups.sort())}`;
+    
+    // Prevent duplicate initialization with same parameters
+    if (initializationRef.current && lastInitParamsRef.current === currentParams) {
+      if (DEBUG_MODE) {
+        console.log("Leaderboard already initialized with same parameters, skipping...");
+      }
+      return;
+    }
 
-    console.log("🔄 Setting up leaderboard for user groups:", userGroups);
+    if (DEBUG_MODE) {
+      console.log("Initializing leaderboard with data:", {
+        userId,
+        period: normalizedPeriod,
+        validGroupsCount: userGroups.length,
+        paramsChanged: lastInitParamsRef.current !== currentParams
+      });
+    }
 
+    initializationRef.current = true;
+    lastInitParamsRef.current = currentParams;
+
+    // Determine available scopes based on user profile
     const scopes = Object.keys(SCOPE_FIELD_MAP).filter((k) => {
-      if (k === "global") return true; // Global is always available
-      if (k === "group") return userGroups.length > 0; // Group available if user has groups
+      if (k === "global") return true;
+      if (k === "group") return userGroups.length > 0;
       
       const field = SCOPE_FIELD_MAP[k];
-      const hasField = field && userProfile[field];
-      console.log(`Checking scope ${k}: field=${field}, value=${userProfile[field]}, available=${hasField}`);
-      return hasField;
+      return field && userProfile[field];
     });
 
-    console.log("Available scopes based on user profile:", scopes);
     setAvailableScopes(scopes);
 
     // Clear previous results
     setLeaderboards({});
     setErrors({});
+    setLoadingScopes({});
 
     // Fetch all scopes except group
-    scopes.filter(scope => scope !== 'group').forEach((scope) => {
-      console.log(`🚀 Fetching scope: ${scope}`);
+    const nonGroupScopes = scopes.filter(scope => scope !== 'group');
+    if (DEBUG_MODE && nonGroupScopes.length > 0) {
+      console.log("Fetching non-group scopes:", nonGroupScopes);
+    }
+    
+    nonGroupScopes.forEach((scope) => {
       fetchScope(scope);
     });
 
-    // 🔧 FIX 9: Fetch all user groups
-    userGroups.forEach((groupId) => {
-      console.log(`🚀 Fetching group scope: ${groupId}`);
-      fetchScope('group', false, groupId);
-    });
-  }, [userProfile, fetchScope, isReady]);
+    // Fetch all valid user groups
+    if (userGroups.length > 0) {
+      if (DEBUG_MODE) {
+        console.log("Fetching group scopes:", userGroups);
+      }
+      userGroups.forEach((groupId) => {
+        fetchScope('group', false, groupId);
+      });
+    }
 
-  // 🔧 FIX 10: Enhanced group listener for multiple groups
+    setInitialized(true);
+    
+    if (DEBUG_MODE) {
+      console.log("Leaderboard initialization complete");
+    }
+
+  }, [userId, normalizedPeriod, userGroups, userProfile, fetchScope, isReady]);
+
   const listenGroup = useCallback(
     (groupId) => {
       if (!isReady() || !groupId) {
-        console.log("Cannot listen to group - not ready or missing groupId:", {
-          isReady: isReady(),
-          userId,
-          normalizedPeriod,
-          groupId,
-        });
+        if (DEBUG_MODE) {
+          console.log("Cannot listen to group - not ready or missing groupId");
+        }
         return;
       }
 
       const groupKey = sanitizeId(groupId);
 
-      if (groupListenersRef.current[groupKey]) {
-        console.log(`Already listening to group ${groupId}`);
-        return;
+      // Prevent duplicate listeners using Map
+      if (groupListenersRef.current.has(groupKey)) {
+        if (DEBUG_MODE) {
+          console.log(`Already listening to group: ${groupId}, skipping duplicate`);
+        }
+        return; // Already listening
       }
 
-      console.log(`🎧 Setting up listener for group: ${groupId}`);
+      if (DEBUG_MODE) {
+        console.log(`Setting up live listener for group: ${groupId}`);
+      }
 
       try {
         const groupQuery = query(
@@ -393,104 +288,107 @@ const normalizedPeriod = useMemo(() => {
         const unsubscribe = onSnapshot(
           groupQuery,
           (snapshot) => {
-            console.log(
-              `🔄 Live update for group ${groupId}: ${snapshot.size} documents`
-            );
+            if (DEBUG_MODE && snapshot.docChanges().length > 0) {
+              console.log(`Live update for group ${groupId}: ${snapshot.size} docs, ${snapshot.docChanges().length} changes`);
+            }
 
             let entries = [];
             snapshot.forEach((doc) => {
               entries.push({ ...doc.data(), id: doc.id });
             });
 
-            // Filter and deduplicate
-            const validEntries = entries.filter(entry => 
-              entry.combinedScore !== undefined && 
-              entry.finishedAt && 
-              entry.userId &&
-              typeof entry.combinedScore === 'number' &&
-              !isNaN(entry.combinedScore)
-            );
+            // Filter and process entries
+            const validEntries = entries.filter(isValidLeaderboardEntry);
+            const cleanedEntries = getCleanLeaderboard(validEntries, true);
+            const rankedEntries = addRanksToEntries(cleanedEntries);
 
-            const deduplicatedEntries = deduplicateEntries(validEntries, 'best');
-
-            const sortedEntries = deduplicatedEntries.sort((a, b) => {
-              if (b.combinedScore !== a.combinedScore)
-                return b.combinedScore - a.combinedScore;
-              if ((a.timeTaken ?? Infinity) !== (b.timeTaken ?? Infinity))
-                return (a.timeTaken ?? Infinity) - (b.timeTaken ?? Infinity);
-              return (
-                (b.finishedAt?.toMillis?.() ?? 0) -
-                (a.finishedAt?.toMillis?.() ?? 0)
-              );
-            });
-
-            sortedEntries.forEach((entry, idx) => {
-              entry.rank = idx + 1;
-            });
-
-            console.log(`✅ Processed entries for group ${groupId}:`, sortedEntries.length);
+            if (DEBUG_MODE) {
+              console.log(`Live processed entries for group ${groupId}: ${validEntries.length} → ${cleanedEntries.length} → ${rankedEntries.length}`);
+            }
 
             setLeaderboards((prev) => ({
               ...prev,
               group: {
                 ...prev.group,
-                [groupKey]: { entries: sortedEntries, hasMore: false },
+                [groupKey]: { 
+                  entries: rankedEntries, 
+                  hasMore: false, 
+                  isEmpty: rankedEntries.length === 0 
+                },
               },
             }));
           },
           (error) => {
-            console.error(`Error listening to group ${groupId}:`, error);
+            console.error(`Error in live listener for group ${groupId}:`, error);
+            setErrors((prev) => ({
+              ...prev,
+              group: `Live update error: ${error.message}`
+            }));
           }
         );
 
-        groupListenersRef.current[groupKey] = unsubscribe;
-        return () => unsubscribe();
+        groupListenersRef.current.set(groupKey, unsubscribe);
+        return () => {
+          unsubscribe();
+          groupListenersRef.current.delete(groupKey);
+        };
       } catch (error) {
         console.error(`Error setting up group listener:`, error);
       }
     },
-    [isReady, userId, normalizedPeriod, deduplicateEntries]
+    [isReady, normalizedPeriod]
   );
 
-  // 🔧 FIX 11: Listen to all user groups automatically
+  // Setup live listeners after initialization - Fix ESLint warning
   useEffect(() => {
-    if (!isReady()) return;
+    if (!initialized || !isReady() || mode !== "live" || userGroups.length === 0) {
+      return;
+    }
 
-    const userGroups = [...new Set([
-      userProfile?.groupId,
-      userProfile?.group,
-      ...(userProfile?.groups || [])
-    ].filter(Boolean))];
+    // Capture the current listeners ref at effect setup time
+    const currentListeners = groupListenersRef.current;
 
-    console.log("🎧 Auto-listening to user groups:", userGroups);
+    if (DEBUG_MODE) {
+      console.log("Setting up live listeners for groups:", userGroups);
+    }
 
+    // Setup listeners for valid groups only
     userGroups.forEach(groupId => {
       listenGroup(groupId);
     });
 
-    // Cleanup function
+    // Cleanup function - use the captured reference
     return () => {
-      Object.values(groupListenersRef.current).forEach(unsubscribe => {
+      if (DEBUG_MODE) {
+        console.log("Cleaning up all group listeners");
+      }
+      currentListeners.forEach(unsubscribe => {
         if (typeof unsubscribe === 'function') {
           unsubscribe();
         }
       });
-      groupListenersRef.current = {};
+      currentListeners.clear();
     };
-  }, [isReady, userProfile, listenGroup]);
+  }, [initialized, isReady, mode, userGroups, listenGroup]);
 
   const stopListeningGroup = useCallback((groupId) => {
     const groupKey = sanitizeId(groupId);
-    if (groupListenersRef.current[groupKey]) {
-      groupListenersRef.current[groupKey]();
-      delete groupListenersRef.current[groupKey];
+    const unsubscribe = groupListenersRef.current.get(groupKey);
+    if (unsubscribe) {
+      if (DEBUG_MODE) {
+        console.log(`Stopping listener for group: ${groupId}`);
+      }
+      unsubscribe();
+      groupListenersRef.current.delete(groupKey);
     }
   }, []);
 
   const loadLeaderboardPage = useCallback(
     (scopeKey, append = false, scopeId = null, limit = PAGE_SIZE) => {
       if (!isReady()) {
-        console.log("Cannot load leaderboard page - not ready");
+        if (DEBUG_MODE) {
+          console.log("Cannot load leaderboard page - not ready");
+        }
         return;
       }
       fetchScope(scopeKey, append, scopeId, limit);
@@ -498,7 +396,13 @@ const normalizedPeriod = useMemo(() => {
     [fetchScope, isReady]
   );
 
-  // 🔧 FIX 12: Enhanced return object with multiple groups
+  const readyState = isReady();
+
+  // Get the best group ID for UI components
+  const bestGroupId = useMemo(() => {
+    return getBestGroupId(userGroups);
+  }, [userGroups]);
+
   return {
     leaderboards,
     loadingScopes,
@@ -507,13 +411,18 @@ const normalizedPeriod = useMemo(() => {
     listenGroup,
     stopListeningGroup,
     loadLeaderboardPage,
-    // New utilities
-    isReady: isReady(),
-    userGroups: [...new Set([
-      userProfile?.groupId,
-      userProfile?.group,
-      ...(userProfile?.groups || [])
-    ].filter(Boolean))],
+    isReady: readyState,
+    initialized,
+    userGroups, // Now contains only valid groups
+    bestGroupId, // Best group ID to use in UI
+    // Debug info only in development
+    debug: DEBUG_MODE ? {
+      userId: !!userId,
+      period: normalizedPeriod,
+      profileLoaded: !!userProfile,
+      initializationComplete: initialized,
+      lastInitParams: lastInitParamsRef.current,
+      validGroupsCount: userGroups.length
+    } : undefined
   };
 }
-
